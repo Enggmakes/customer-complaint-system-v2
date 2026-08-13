@@ -79,6 +79,51 @@ def _invoke_with_retry(llm, messages, retries=1):
     return ""
 
 
+
+VALID_CATEGORIES = [
+    "Product Defect - Discoloration",
+    "Product Defect - Particulate",
+    "Product Defect - Packaging",
+    "Product Defect - Odor",
+    "Efficacy Complaint",
+    "Adverse Event",
+    "Label/Documentation Error",
+    "Shortage",
+    "Other"
+]
+
+def _normalize_category(val: str, text: str = "") -> str:
+    if val in VALID_CATEGORIES:
+        return val
+
+    v_lower = (val or "").lower()
+    t_lower = (text or "").lower()
+    combined = f"{v_lower} {t_lower}"
+
+    if any(w in combined for w in ["discolor", "color", "stain", "fade", "yellow"]):
+        return "Product Defect - Discoloration"
+    if any(w in combined for w in ["particulate", "foreign", "particle", "contam", "black spec", "speck", "dust"]):
+        return "Product Defect - Particulate"
+    if any(w in combined for w in ["packag", "seal", "leak", "chip", "crumbl", "break", "broken", "blister", "bottle", "foil", "damaged", "crushed"]):
+        return "Product Defect - Packaging"
+    if any(w in combined for w in ["smell", "odor", "odour", "foul", "stench"]):
+        return "Product Defect - Odor"
+    if any(w in combined for w in ["efficacy", "ineffective", "no effect", "potency", "subtherapeutic"]):
+        return "Efficacy Complaint"
+    if any(w in combined for w in ["adverse", "side effect", "reaction", "icu", "hypoglycemia", "hospital", "toxicity", "death"]):
+        return "Adverse Event"
+    if any(w in combined for w in ["label", "doc", "print", "smudge", "mislabel", "misprint", "carton"]):
+        return "Label/Documentation Error"
+    if any(w in combined for w in ["short", "missing", "count", "quantity mismatch"]):
+        return "Shortage"
+
+    for cat in VALID_CATEGORIES:
+        if cat.lower() in v_lower or v_lower in cat.lower():
+            return cat
+
+    return "Product Defect - Packaging"
+
+
 def _normalize_date(val: str) -> str:
     if not val:
         return val
@@ -340,6 +385,7 @@ CURRENT RECORD STATE:
 
 INSTRUCTIONS:
 1. If the user message is a NEW complaint, extract all structured fields.
+   - IMPORTANT: 'complaint_category' MUST BE EXACTLY ONE OF: 'Product Defect - Discoloration', 'Product Defect - Particulate', 'Product Defect - Packaging', 'Product Defect - Odor', 'Efficacy Complaint', 'Adverse Event', 'Label/Documentation Error', 'Shortage', 'Other'.
 2. If the user message is a MODIFICATION / CORRECTION (e.g. 'change expiry date to Feb 2029', 'quantity are change to 56', 'improve initial risk assessment', 'change severity to critical'):
    - PRESERVE all existing fields unless explicitly requested to update.
    - IMPORTANT: 'manufacturing_date' and 'expiry_date' are SEPARATE fields. Updating expiry_date MUST NOT change manufacturing_date, and updating manufacturing_date MUST NOT change expiry_date.
@@ -402,7 +448,7 @@ Return ONLY a JSON object:
         "expiry_date": merged.get("expiry_date") or "February 2028",
         "originating_site": merged.get("originating_site"),
         "impacted_npm": merged.get("impacted_npm"),
-        "complaint_category": merged.get("complaint_category") or "Product Defect - Discoloration",
+        "complaint_category": _normalize_category(merged.get("complaint_category"), raw_input),
         "complaint_description": merged.get("complaint_description") or "Customer reported quality issue.",
         "severity": merged.get("severity"),
         "suggested_action": merged.get("suggested_action"),
