@@ -1,0 +1,31 @@
+# Environment variables (SECURITY - DO NOT COMMIT)
+.env
+*.env
+*.env.local
+
+# Python / Cache
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Databases & Local Data
+*.db
+*.sqlite
+*.sqlite3
+ccms.db
+
+# Frontend Node Modules & Build
+node_modules/
+dist/
+dist-ssr/
+*.local
+
+# IDEs & System files
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
