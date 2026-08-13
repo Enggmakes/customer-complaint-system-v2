@@ -7,7 +7,7 @@ export const fetchComplaints = createAsyncThunk(
   'complaints/fetchAll',
   async (_, { rejectWithValue }) => {
     try {
-      const res = await api.get('/complaints');
+      const res = await api.get('/api/complaints');
       return res.data;
     } catch (err) {
       return rejectWithValue(err.response?.data?.detail || 'Failed to fetch complaints');
@@ -19,7 +19,7 @@ export const commitComplaint = createAsyncThunk(
   'complaints/commit',
   async ({ session_id, complaint_data }, { rejectWithValue }) => {
     try {
-      const res = await api.post('/complaints/commit', { session_id, complaint_data });
+      const res = await api.post('/api/complaints/commit', { session_id, complaint_data });
       return res.data;
     } catch (err) {
       return rejectWithValue(err.response?.data?.detail || 'Failed to commit complaint');
@@ -31,7 +31,7 @@ export const deleteComplaint = createAsyncThunk(
   'complaints/delete',
   async (id, { rejectWithValue }) => {
     try {
-      await api.delete(`/complaints/${id}`);
+      await api.delete(`/api/complaints/${id}`);
       return id;
     } catch (err) {
       return rejectWithValue(err.response?.data?.detail || 'Failed to delete complaint');
@@ -43,7 +43,7 @@ export const fetchComplaintBySession = createAsyncThunk(
   'complaints/fetchBySession',
   async (session_id, { rejectWithValue }) => {
     try {
-      const res = await api.get(`/complaints/session/${session_id}`);
+      const res = await api.get(`/api/complaints/session/${session_id}`);
       return res.data;
     } catch (err) {
       return rejectWithValue(err.response?.data?.detail || 'Failed to fetch complaint session');

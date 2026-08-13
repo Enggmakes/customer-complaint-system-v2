@@ -7,7 +7,7 @@ export const sendChatMessage = createAsyncThunk(
   'chat/sendMessage',
   async ({ session_id, message }, { rejectWithValue }) => {
     try {
-      const res = await api.post('/chat/message', { session_id, message });
+      const res = await api.post('/api/chat/message', { session_id, message });
       return res.data;
     } catch (err) {
       return rejectWithValue(err.response?.data?.detail || 'Failed to send message');
@@ -23,7 +23,7 @@ export const uploadChatDocument = createAsyncThunk(
       formData.append('session_id', session_id);
       formData.append('file', file);
 
-      const res = await api.post('/chat/upload', formData, {
+      const res = await api.post('/api/chat/upload', formData, {
         headers: {
           'Content-Type': 'multipart/form-data',
         },
@@ -39,7 +39,7 @@ export const fetchChatHistory = createAsyncThunk(
   'chat/fetchHistory',
   async (session_id, { rejectWithValue }) => {
     try {
-      const res = await api.get(`/chat/${session_id}/history`);
+      const res = await api.get(`/api/chat/${session_id}/history`);
       return res.data;
     } catch (err) {
       return rejectWithValue(err.response?.data?.detail || 'Failed to fetch history');
