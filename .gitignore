@@ -1,7 +1,6 @@
 # Environment variables (SECURITY - DO NOT COMMIT)
 .env
-*.env
-*.env.local
+.env.local
 
 # Python / Cache
 __pycache__/
