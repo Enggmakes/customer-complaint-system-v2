@@ -1700,7 +1700,41 @@ tbody td {
   }
 }
 
+/* Chart Builder Header & Type Selector Responsive */
+.chart-builder-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 16px;
+  flex-wrap: wrap;
+  width: 100%;
+}
+
+.chart-type-selector-pill {
+  display: flex;
+  gap: 4px;
+  background: var(--color-surface-2);
+  padding: 3px;
+  border-radius: var(--radius-md);
+}
+
 @media (max-width: 640px) {
+  .chart-builder-header {
+    flex-direction: column !important;
+    align-items: flex-start !important;
+    gap: 10px !important;
+  }
+
+  .chart-type-selector-pill {
+    width: 100% !important;
+  }
+
+  .chart-type-selector-pill .btn {
+    flex: 1 !important;
+    justify-content: center !important;
+  }
+
   .chart-controls-grid {
     display: grid !important;
     grid-template-columns: repeat(2, 1fr) !important;
@@ -1710,6 +1744,20 @@ tbody td {
   .chart-control-field {
     min-width: 0 !important;
     width: 100% !important;
+  }
+
+  .datalens-main-grid,
+  .datalens-page,
+  .tool-workspace-card,
+  .table-card {
+    min-width: 0 !important;
+    max-width: 100% !important;
+    overflow-x: hidden !important;
+  }
+
+  .datalens-main-grid > * {
+    min-width: 0 !important;
+    max-width: 100% !important;
   }
 }
 

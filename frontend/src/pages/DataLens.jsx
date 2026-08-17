@@ -428,14 +428,14 @@ export default function DataLens() {
       <div className="datalens-main-grid">
         {/* Left: Interactive Visual Chart Studio */}
         <div className="tool-workspace-card" style={{ marginBottom: 0 }}>
-          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 16, flexWrap: 'wrap', gap: 8 }}>
+          <div className="chart-builder-header">
             <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
               <BarChart3 size={17} color="var(--color-primary)" />
               <h3 style={{ fontSize: 15, fontWeight: 700 }}>Interactive Visual Chart Builder</h3>
             </div>
 
             {/* Chart Type Selector */}
-            <div style={{ display: 'flex', gap: 4, background: 'var(--color-surface-2)', padding: 3, borderRadius: 'var(--radius-md)' }}>
+            <div className="chart-type-selector-pill">
               <button
                 type="button"
                 className={`btn btn-secondary ${chartType === 'bar' ? 'active' : ''}`}
@@ -757,41 +757,42 @@ export default function DataLens() {
 function SVGBarChart({ data, yLabel }) {
   const maxVal = Math.max(...data.map((d) => d.value), 1);
   const chartHeight = 180;
+  const barMinWidth = Math.max(data.length * 48, 280);
 
   return (
-    <div>
+    <div style={{ width: '100%', overflowX: 'auto', minWidth: 0, paddingBottom: 4 }}>
       <div style={{ fontSize: 11, color: '#94a3b8', marginBottom: 8, fontWeight: 600 }}>
         Metric: {yLabel}
       </div>
-      <div style={{ display: 'flex', alignItems: 'flex-end', gap: 12, height: chartHeight, paddingBottom: 24, borderBottom: '1px solid #334155' }}>
+      <div style={{ display: 'flex', alignItems: 'flex-end', gap: 10, height: chartHeight, paddingBottom: 24, borderBottom: '1px solid #334155', minWidth: barMinWidth }}>
         {data.map((d, idx) => {
           const heightPct = Math.max(8, (d.value / maxVal) * 100);
           return (
-            <div key={idx} style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', height: '100%', justifyContent: 'flex-end' }}>
-              <div style={{ fontSize: 10, color: '#38bdf8', fontWeight: 700, marginBottom: 4 }}>
+            <div key={idx} style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', height: '100%', justifyContent: 'flex-end', minWidth: 32 }}>
+              <div style={{ fontSize: 10, color: '#60a5fa', fontWeight: 700, marginBottom: 4 }}>
                 {d.value.toLocaleString()}
               </div>
               <div
                 style={{
                   width: '100%',
-                  maxWidth: 42,
+                  maxWidth: 38,
                   height: `${heightPct}%`,
-                  background: 'linear-gradient(180deg, #38bdf8 0%, #3b82f6 100%)',
+                  background: 'linear-gradient(180deg, #60a5fa 0%, #2563eb 100%)',
                   borderRadius: '4px 4px 0 0',
                   transition: 'height 0.4s ease',
-                  boxShadow: '0 0 10px rgba(56, 189, 248, 0.2)',
+                  boxShadow: '0 0 10px rgba(96, 165, 250, 0.2)',
                 }}
                 title={`${d.label}: ${d.value.toLocaleString()}`}
               />
               <div
                 style={{
-                  fontSize: 10.5,
+                  fontSize: 10,
                   color: '#cbd5e1',
                   marginTop: 6,
                   whiteSpace: 'nowrap',
                   overflow: 'hidden',
                   textOverflow: 'ellipsis',
-                  maxWidth: 60,
+                  maxWidth: 56,
                   textAlign: 'center',
                 }}
                 title={d.label}
@@ -810,7 +811,7 @@ function SVGLineChart({ data, yLabel }) {
   const maxVal = Math.max(...data.map((d) => d.value), 1);
   const minVal = Math.min(...data.map((d) => d.value), 0);
   const range = maxVal - minVal || 1;
-  const svgWidth = 500;
+  const svgWidth = Math.max(data.length * 60, 360);
   const svgHeight = 160;
 
   const points = data.map((d, i) => {
@@ -820,28 +821,30 @@ function SVGLineChart({ data, yLabel }) {
   }).join(' ');
 
   return (
-    <div>
+    <div style={{ width: '100%', overflowX: 'auto', minWidth: 0, paddingBottom: 4 }}>
       <div style={{ fontSize: 11, color: '#94a3b8', marginBottom: 8, fontWeight: 600 }}>
         Trend: {yLabel}
       </div>
-      <svg viewBox={`0 0 ${svgWidth} ${svgHeight}`} style={{ width: '100%', height: 160, overflow: 'visible' }}>
-        <polyline fill="none" stroke="#818cf8" strokeWidth="3" points={points} />
-        {data.map((d, i) => {
-          const x = (i / Math.max(data.length - 1, 1)) * (svgWidth - 40) + 20;
-          const y = svgHeight - ((d.value - minVal) / range) * (svgHeight - 40) - 20;
-          return (
-            <g key={i}>
-              <circle cx={x} cy={y} r="5" fill="#4f46e5" stroke="#fff" strokeWidth="2" />
-              <text x={x} y={y - 10} fill="#c7d2fe" fontSize="10" textAnchor="middle">
-                {d.value}
-              </text>
-              <text x={x} y={svgHeight + 14} fill="#94a3b8" fontSize="10" textAnchor="middle">
-                {d.label.slice(0, 8)}
-              </text>
-            </g>
-          );
-        })}
-      </svg>
+      <div style={{ minWidth: svgWidth }}>
+        <svg viewBox={`0 0 ${svgWidth} ${svgHeight}`} style={{ width: '100%', height: 160, overflow: 'visible' }}>
+          <polyline fill="none" stroke="#818cf8" strokeWidth="3" points={points} />
+          {data.map((d, i) => {
+            const x = (i / Math.max(data.length - 1, 1)) * (svgWidth - 40) + 20;
+            const y = svgHeight - ((d.value - minVal) / range) * (svgHeight - 40) - 20;
+            return (
+              <g key={i}>
+                <circle cx={x} cy={y} r="5" fill="#3b82f6" stroke="#fff" strokeWidth="2" />
+                <text x={x} y={y - 10} fill="#c7d2fe" fontSize="10" textAnchor="middle">
+                  {d.value}
+                </text>
+                <text x={x} y={svgHeight + 14} fill="#94a3b8" fontSize="10" textAnchor="middle">
+                  {d.label.slice(0, 8)}
+                </text>
+              </g>
+            );
+          })}
+        </svg>
+      </div>
     </div>
   );
 }
@@ -849,11 +852,11 @@ function SVGLineChart({ data, yLabel }) {
 function SVGDonutChart({ data }) {
   const total = data.reduce((acc, d) => acc + d.value, 0) || 1;
   let accumulatedAngle = 0;
-  const colors = ['#38bdf8', '#818cf8', '#34d399', '#f472b6', '#fbbf24', '#a78bfa', '#f87171', '#38bdf8'];
+  const colors = ['#60a5fa', '#818cf8', '#34d399', '#f472b6', '#fbbf24', '#a78bfa', '#f87171', '#3b82f6'];
 
   return (
-    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-around', gap: 20 }}>
-      <svg viewBox="0 0 160 160" style={{ width: 150, height: 150 }}>
+    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-around', gap: 16, flexWrap: 'wrap', width: '100%', minWidth: 0 }}>
+      <svg viewBox="0 0 160 160" style={{ width: 140, height: 140, flexShrink: 0 }}>
         {data.map((d, i) => {
           const sliceAngle = (d.value / total) * 360;
           const startAngle = accumulatedAngle;
@@ -876,13 +879,13 @@ function SVGDonutChart({ data }) {
         </text>
       </svg>
 
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 6, maxHeight: 160, overflowY: 'auto' }}>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 6, maxHeight: 160, overflowY: 'auto', minWidth: 120, flex: 1 }}>
         {data.map((d, i) => {
           const pct = Math.round((d.value / total) * 100);
           return (
             <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 11 }}>
-              <div style={{ width: 10, height: 10, borderRadius: '50%', background: colors[i % colors.length] }} />
-              <span style={{ color: '#cbd5e1' }}>{d.label}:</span>
+              <div style={{ width: 10, height: 10, borderRadius: '50%', background: colors[i % colors.length], flexShrink: 0 }} />
+              <span style={{ color: '#cbd5e1', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: 90 }}>{d.label}:</span>
               <strong style={{ color: '#fff' }}>{pct}%</strong>
             </div>
           );
@@ -891,3 +894,4 @@ function SVGDonutChart({ data }) {
     </div>
   );
 }
+
