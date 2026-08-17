@@ -33,9 +33,18 @@ import {
   User,
   Tag,
   Share2,
+  Code,
+  FileCheck,
+  ArrowUpRight,
+  Hash,
+  Package,
+  ShieldCheck as ShieldCheckIcon,
+  AlertCircle,
+  Trash2,
 } from 'lucide-react';
 import api from '../services/api';
 import { addToast } from '../store/uiSlice';
+import { setSessionId } from '../store/chatSlice';
 
 // ─── 1-Click Project Templates (Clean Vector Icons) ──────────────────────────
 
@@ -121,6 +130,18 @@ export default function AITools() {
   const [ocrFile, setOcrFile] = useState(null);
   const [ocrLoading, setOcrLoading] = useState(false);
   const [ocrResult, setOcrResult] = useState(null);
+  const [ocrViewMode, setOcrViewMode] = useState('cards'); // 'cards' | 'raw_text' | 'json'
+  const [copiedOcr, setCopiedOcr] = useState(false);
+
+  // Helper to clean raw asterisks and hashes from OCR response
+  const cleanSummary = (text) => {
+    if (!text) return '';
+    return text
+      .replace(/[*#`_~]/g, '')
+      .replace(/⚡/g, '')
+      .replace(/\s+/g, ' ')
+      .trim();
+  };
 
   // ─── Proposal Generator Handlers ───────────────────────────────────────────
 
@@ -245,6 +266,73 @@ export default function AITools() {
     } finally {
       setOcrLoading(false);
     }
+  };
+
+  const handleTransferToProposal = () => {
+    if (!ocrResult?.extracted_data) return;
+    const data = ocrResult.extracted_data;
+    setProposalForm({
+      service_title: data.product_name || data.title || 'Extracted Service Scope',
+      client_name: data.customer_name || 'Client Organization',
+      budget_range: '$4,500 - $7,000',
+      target_timeline: '3-4 Weeks',
+      service_description: data.defect_summary || data.complaint_description || cleanSummary(ocrResult.ai_response) || '',
+      deliverables: data.impacted_npm || data.product_strength || 'Core Architecture, Engineering & Verification',
+    });
+    setActiveTab('proposal');
+    dispatch(addToast({ type: 'success', message: 'Extracted data transferred to Proposal Studio!' }));
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  };
+
+  const handleTransferToEmail = () => {
+    if (!ocrResult?.extracted_data) return;
+    const data = ocrResult.extracted_data;
+    setEmailForm({
+      recipient_name: data.customer_name || 'Client Contact',
+      recipient_role: 'Operations Lead',
+      context_type: data.record_type === 'service_request' ? 'proposal_submission' : 'complaint_resolution',
+      subject_matter: data.product_name || data.title || 'Document Scope Follow-up',
+      tone: 'executive_formal',
+      key_points: data.defect_summary || 'Document reviewed and extracted into operational pipeline.',
+    });
+    setActiveTab('email');
+    dispatch(addToast({ type: 'success', message: 'Contact details transferred to Email Studio!' }));
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  };
+
+  const handleOpenInOperationsHub = () => {
+    if (!ocrResult?.session_id) return;
+    dispatch(setSessionId(ocrResult.session_id));
+    localStorage.setItem('ccms_active_session_id', ocrResult.session_id);
+    navigate(`/log-complaint?session_id=${ocrResult.session_id}`);
+    dispatch(addToast({ type: 'info', message: 'Loaded into Operations Intake & Copilot.' }));
+  };
+
+  const handleDownloadOcrJson = () => {
+    if (!ocrResult?.extracted_data) return;
+    const jsonString = `data:text/json;charset=utf-8,${encodeURIComponent(JSON.stringify(ocrResult.extracted_data, null, 2))}`;
+    const downloadAnchor = document.createElement('a');
+    downloadAnchor.setAttribute('href', jsonString);
+    downloadAnchor.setAttribute('download', `${ocrFile?.name || 'document'}_extracted_data.json`);
+    document.body.appendChild(downloadAnchor);
+    downloadAnchor.click();
+    downloadAnchor.remove();
+    dispatch(addToast({ type: 'success', message: 'Structured JSON file downloaded.' }));
+  };
+
+  const handleCopyOcrText = () => {
+    const textToCopy = ocrViewMode === 'json'
+      ? JSON.stringify(ocrResult?.extracted_data, null, 2)
+      : ocrResult?.extracted_text || cleanSummary(ocrResult?.ai_response) || '';
+    navigator.clipboard.writeText(textToCopy);
+    setCopiedOcr(true);
+    dispatch(addToast({ type: 'success', message: 'Copied to clipboard.' }));
+    setTimeout(() => setCopiedOcr(false), 2000);
+  };
+
+  const handleClearOcr = () => {
+    setOcrFile(null);
+    setOcrResult(null);
   };
 
   return (
@@ -933,7 +1021,7 @@ export default function AITools() {
          ═══════════════════════════════════════════════════════════════════════ */}
       {activeTab === 'ocr' && (
         <div className="studio-grid">
-          {/* Left Column: Dropzone & File Details */}
+          {/* Left Column: Dropzone & Document Specs */}
           <div className="tool-workspace-card" style={{ marginBottom: 0 }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 14 }}>
               <FileSearch size={16} color="var(--color-primary)" />
@@ -953,19 +1041,19 @@ export default function AITools() {
                 alignItems: 'center',
                 justifyContent: 'center',
                 padding: '36px 20px',
-                border: '2px dashed var(--color-primary-100)',
+                border: '2px dashed var(--color-primary)',
                 borderRadius: 'var(--radius-lg)',
-                background: 'var(--color-primary-50)',
+                background: 'var(--color-surface-2)',
                 cursor: 'pointer',
                 transition: 'all var(--transition)',
                 marginBottom: 16,
               }}
             >
               <Upload size={32} color="var(--color-primary)" style={{ marginBottom: 10 }} />
-              <span style={{ fontSize: 13, fontWeight: 700, color: 'var(--color-text-primary)' }}>
+              <span style={{ fontSize: 13, fontWeight: 700, color: 'var(--color-text-primary)', textAlign: 'center' }}>
                 {ocrFile ? ocrFile.name : 'Click to Upload or Drag & Drop Document'}
               </span>
-              <span style={{ fontSize: 11, color: 'var(--color-text-muted)', marginTop: 4 }}>
+              <span style={{ fontSize: 11, color: 'var(--color-text-muted)', marginTop: 4, textAlign: 'center' }}>
                 Supports PDF, PNG, JPG, JPEG, TXT, CSV, JSON, LOG
               </span>
               <input
@@ -976,12 +1064,71 @@ export default function AITools() {
               />
             </label>
 
-            {ocrLoading && (
-              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 10, padding: 14, color: 'var(--color-primary)' }}>
-                <Loader2 size={16} className="spinner" />
-                <span>Running DocuMind Optical OCR &amp; Entity Extraction...</span>
+            {/* Active File Details & Reset */}
+            {ocrFile && (
+              <div
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'space-between',
+                  background: 'var(--color-surface-2)',
+                  border: '1px solid var(--color-border)',
+                  borderRadius: 'var(--radius-md)',
+                  padding: '10px 14px',
+                  marginBottom: 16,
+                }}
+              >
+                <div style={{ display: 'flex', alignItems: 'center', gap: 10, minWidth: 0 }}>
+                  <FileCheck size={16} color="var(--color-primary)" style={{ flexShrink: 0 }} />
+                  <div style={{ minWidth: 0 }}>
+                    <div style={{ fontSize: 12.5, fontWeight: 700, color: 'var(--color-text-primary)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                      {ocrFile.name}
+                    </div>
+                    <div style={{ fontSize: 11, color: 'var(--color-text-muted)' }}>
+                      {(ocrFile.size / 1024).toFixed(1)} KB • Ready
+                    </div>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  className="btn btn-secondary"
+                  style={{ padding: '4px 8px', fontSize: 11, border: 'none', color: 'var(--color-danger)' }}
+                  onClick={handleClearOcr}
+                  title="Clear File"
+                >
+                  <Trash2 size={13} />
+                  Clear
+                </button>
               </div>
             )}
+
+            {ocrLoading && (
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 10, padding: 14, color: 'var(--color-primary)', background: 'var(--color-surface-2)', borderRadius: 'var(--radius-md)' }}>
+                <Loader2 size={16} className="spinner" />
+                <span style={{ fontSize: 12.5, fontWeight: 600 }}>Running DocuMind Optical OCR &amp; Entity Extraction...</span>
+              </div>
+            )}
+
+            {/* DocuMind Feature Highlights */}
+            <div style={{ marginTop: 20, borderTop: '1px solid var(--color-border)', paddingTop: 16 }}>
+              <span style={{ fontSize: 11, fontWeight: 700, color: 'var(--color-text-muted)', textTransform: 'uppercase', marginBottom: 10, display: 'block' }}>
+                Extraction Capabilities
+              </span>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 12, color: 'var(--color-text-secondary)' }}>
+                  <ShieldCheckIcon size={14} color="#10b981" />
+                  <span>Key Stakeholder &amp; Entity Identification</span>
+                </div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 12, color: 'var(--color-text-secondary)' }}>
+                  <Package size={14} color="#3b82f6" />
+                  <span>Batch, Serial Number &amp; SKU Parsing</span>
+                </div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 12, color: 'var(--color-text-secondary)' }}>
+                  <Zap size={14} color="#8b5cf6" />
+                  <span>1-Click Dispatch to Operations Hub &amp; Proposal Studio</span>
+                </div>
+              </div>
+            </div>
           </div>
 
           {/* Right Column: Scan Extraction Results */}
@@ -994,8 +1141,11 @@ export default function AITools() {
               boxShadow: 'var(--shadow-md)',
               position: 'sticky',
               top: 20,
+              minWidth: 0,
+              overflow: 'hidden',
             }}
           >
+            {/* Header with Status & Mode Pills */}
             <div
               style={{
                 display: 'flex',
@@ -1004,6 +1154,8 @@ export default function AITools() {
                 paddingBottom: 14,
                 borderBottom: '2px solid var(--color-border)',
                 marginBottom: 16,
+                flexWrap: 'wrap',
+                gap: 10,
               }}
             >
               <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
@@ -1012,35 +1164,296 @@ export default function AITools() {
                   Extracted Entities &amp; Analysis
                 </h3>
               </div>
+
+              {ocrResult && (
+                <div style={{ display: 'flex', gap: 4, background: 'var(--color-surface-2)', padding: 3, borderRadius: 'var(--radius-md)' }}>
+                  <button
+                    type="button"
+                    className={`btn btn-secondary ${ocrViewMode === 'cards' ? 'active' : ''}`}
+                    style={{ padding: '4px 8px', fontSize: 11, border: 'none' }}
+                    onClick={() => setOcrViewMode('cards')}
+                  >
+                    <Layers size={12} />
+                    Cards
+                  </button>
+                  <button
+                    type="button"
+                    className={`btn btn-secondary ${ocrViewMode === 'raw_text' ? 'active' : ''}`}
+                    style={{ padding: '4px 8px', fontSize: 11, border: 'none' }}
+                    onClick={() => setOcrViewMode('raw_text')}
+                  >
+                    <FileText size={12} />
+                    OCR Text
+                  </button>
+                  <button
+                    type="button"
+                    className={`btn btn-secondary ${ocrViewMode === 'json' ? 'active' : ''}`}
+                    style={{ padding: '4px 8px', fontSize: 11, border: 'none' }}
+                    onClick={() => setOcrViewMode('json')}
+                  >
+                    <Code size={12} />
+                    JSON
+                  </button>
+                </div>
+              )}
             </div>
 
             {ocrResult ? (
               <div>
-                <div style={{ marginBottom: 14 }}>
-                  <span style={{ fontSize: 11, fontWeight: 700, color: 'var(--color-text-muted)', textTransform: 'uppercase', marginBottom: 6, display: 'block' }}>
-                    AI Summary
-                  </span>
-                  <p style={{ fontSize: 12.5, color: 'var(--color-text-primary)', lineHeight: 1.5 }}>
-                    {ocrResult.ai_response}
-                  </p>
+                {/* 1-Click Action Dispatcher Strip */}
+                <div
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: 8,
+                    marginBottom: 18,
+                    flexWrap: 'wrap',
+                    background: 'var(--color-surface-2)',
+                    padding: '10px 12px',
+                    borderRadius: 'var(--radius-md)',
+                    border: '1px solid var(--color-border)',
+                  }}
+                >
+                  <button
+                    type="button"
+                    className="btn btn-primary"
+                    style={{ fontSize: 11.5, padding: '6px 12px', flex: 1, minWidth: 140, justifyContent: 'center' }}
+                    onClick={handleOpenInOperationsHub}
+                  >
+                    <ArrowUpRight size={13} />
+                    Open in Operations Hub
+                  </button>
+                  <button
+                    type="button"
+                    className="btn btn-secondary"
+                    style={{ fontSize: 11.5, padding: '6px 12px', flex: 1, minWidth: 130, justifyContent: 'center' }}
+                    onClick={handleTransferToProposal}
+                  >
+                    <Rocket size={13} />
+                    To Proposal Studio
+                  </button>
+                  <button
+                    type="button"
+                    className="btn btn-secondary"
+                    style={{ fontSize: 11.5, padding: '6px 12px', flex: 1, minWidth: 120, justifyContent: 'center' }}
+                    onClick={handleTransferToEmail}
+                  >
+                    <Mail size={13} />
+                    To Email Studio
+                  </button>
                 </div>
 
-                {ocrResult.extracted_data && (
+                {/* MODE 1: EXECUTIVE CARDS VIEW */}
+                {ocrViewMode === 'cards' && (
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+                    {/* Clean Executive Summary */}
+                    <div
+                      style={{
+                        background: 'var(--color-surface-2)',
+                        border: '1px solid var(--color-border)',
+                        borderRadius: 'var(--radius-md)',
+                        padding: '14px 16px',
+                      }}
+                    >
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 6 }}>
+                        <Sparkles size={14} color="var(--color-primary)" />
+                        <span style={{ fontSize: 11, fontWeight: 700, color: 'var(--color-text-muted)', textTransform: 'uppercase' }}>
+                          Executive AI Synthesis
+                        </span>
+                      </div>
+                      <p style={{ fontSize: 12.5, color: 'var(--color-text-primary)', lineHeight: 1.6, margin: 0 }}>
+                        {cleanSummary(ocrResult.ai_response) || cleanSummary(ocrResult.extracted_data?.defect_summary) || 'Document analyzed and structured into operational schema.'}
+                      </p>
+                    </div>
+
+                    {/* Extracted Key Entities Grid */}
+                    <div>
+                      <span style={{ fontSize: 11, fontWeight: 700, color: 'var(--color-text-muted)', textTransform: 'uppercase', marginBottom: 8, display: 'block' }}>
+                        Identified Entities &amp; Specifications
+                      </span>
+                      <div
+                        style={{
+                          display: 'grid',
+                          gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))',
+                          gap: 10,
+                        }}
+                      >
+                        {/* Stakeholder / Client */}
+                        <div style={{ background: 'var(--color-surface-2)', padding: '10px 12px', borderRadius: 'var(--radius-md)', border: '1px solid var(--color-border)' }}>
+                          <div style={{ fontSize: 10.5, color: 'var(--color-text-muted)', display: 'flex', alignItems: 'center', gap: 4, marginBottom: 2 }}>
+                            <User size={11} /> Client / Stakeholder
+                          </div>
+                          <div style={{ fontSize: 12.5, fontWeight: 700, color: 'var(--color-text-primary)' }}>
+                            {ocrResult.extracted_data?.customer_name || 'Not specified'}
+                          </div>
+                        </div>
+
+                        {/* Product / Service */}
+                        <div style={{ background: 'var(--color-surface-2)', padding: '10px 12px', borderRadius: 'var(--radius-md)', border: '1px solid var(--color-border)' }}>
+                          <div style={{ fontSize: 10.5, color: 'var(--color-text-muted)', display: 'flex', alignItems: 'center', gap: 4, marginBottom: 2 }}>
+                            <Briefcase size={11} /> Product / Service Scope
+                          </div>
+                          <div style={{ fontSize: 12.5, fontWeight: 700, color: 'var(--color-text-primary)' }}>
+                            {ocrResult.extracted_data?.product_name || ocrResult.extracted_data?.title || 'General Scope'}
+                          </div>
+                        </div>
+
+                        {/* Reference / Batch ID */}
+                        <div style={{ background: 'var(--color-surface-2)', padding: '10px 12px', borderRadius: 'var(--radius-md)', border: '1px solid var(--color-border)' }}>
+                          <div style={{ fontSize: 10.5, color: 'var(--color-text-muted)', display: 'flex', alignItems: 'center', gap: 4, marginBottom: 2 }}>
+                            <Hash size={11} /> Identifier / Batch
+                          </div>
+                          <div style={{ fontSize: 12.5, fontWeight: 700, color: 'var(--color-text-primary)' }}>
+                            {ocrResult.extracted_data?.batch_lot_number || 'N/A'}
+                          </div>
+                        </div>
+
+                        {/* Category / Type */}
+                        <div style={{ background: 'var(--color-surface-2)', padding: '10px 12px', borderRadius: 'var(--radius-md)', border: '1px solid var(--color-border)' }}>
+                          <div style={{ fontSize: 10.5, color: 'var(--color-text-muted)', display: 'flex', alignItems: 'center', gap: 4, marginBottom: 2 }}>
+                            <Tag size={11} /> Record Type / Category
+                          </div>
+                          <div style={{ fontSize: 12.5, fontWeight: 700, color: 'var(--color-text-primary)' }}>
+                            {ocrResult.extracted_data?.record_type || ocrResult.extracted_data?.complaint_category || 'Service Request'}
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Operational Scope & Technical Parameters */}
+                    {(ocrResult.extracted_data?.product_strength || ocrResult.extracted_data?.impacted_npm || ocrResult.extracted_data?.originating_site) && (
+                      <div
+                        style={{
+                          background: 'var(--color-surface-2)',
+                          border: '1px solid var(--color-border)',
+                          borderRadius: 'var(--radius-md)',
+                          padding: '12px 14px',
+                        }}
+                      >
+                        <span style={{ fontSize: 11, fontWeight: 700, color: 'var(--color-text-muted)', textTransform: 'uppercase', marginBottom: 6, display: 'block' }}>
+                          Technical Scope &amp; Parameters
+                        </span>
+                        <div style={{ fontSize: 12, color: 'var(--color-text-primary)', lineHeight: 1.5 }}>
+                          {ocrResult.extracted_data?.product_strength && (
+                            <div><strong>Technologies / Strengths:</strong> {ocrResult.extracted_data.product_strength}</div>
+                          )}
+                          {ocrResult.extracted_data?.impacted_npm && (
+                            <div style={{ marginTop: 4 }}><strong>Impacted Modules:</strong> {ocrResult.extracted_data.impacted_npm}</div>
+                          )}
+                          {ocrResult.extracted_data?.originating_site && (
+                            <div style={{ marginTop: 4 }}><strong>Originating Unit:</strong> {ocrResult.extracted_data.originating_site}</div>
+                          )}
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Risk & Recommendation Card */}
+                    {(ocrResult.extracted_data?.initial_risk_assessment || ocrResult.extracted_data?.suggested_action) && (
+                      <div
+                        style={{
+                          background: 'rgba(59, 130, 246, 0.05)',
+                          border: '1px solid rgba(59, 130, 246, 0.2)',
+                          borderRadius: 'var(--radius-md)',
+                          padding: '12px 14px',
+                        }}
+                      >
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 4 }}>
+                          <ShieldCheckIcon size={14} color="var(--color-primary)" />
+                          <span style={{ fontSize: 11, fontWeight: 700, color: 'var(--color-primary)', textTransform: 'uppercase' }}>
+                            Risk Assessment &amp; Next Steps
+                          </span>
+                        </div>
+                        {ocrResult.extracted_data?.initial_risk_assessment && (
+                          <p style={{ fontSize: 12, color: 'var(--color-text-primary)', margin: '4px 0 6px' }}>
+                            <strong>Evaluation:</strong> {ocrResult.extracted_data.initial_risk_assessment}
+                          </p>
+                        )}
+                        {ocrResult.extracted_data?.suggested_action && (
+                          <p style={{ fontSize: 12, color: 'var(--color-text-primary)', margin: 0 }}>
+                            <strong>Recommended Action:</strong> {ocrResult.extracted_data.suggested_action}
+                          </p>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                {/* MODE 2: RAW OCR TEXT VIEW */}
+                {ocrViewMode === 'raw_text' && (
                   <div>
-                    <span style={{ fontSize: 11, fontWeight: 700, color: 'var(--color-text-muted)', textTransform: 'uppercase', marginBottom: 6, display: 'block' }}>
-                      Structured Field Extraction
-                    </span>
+                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
+                      <span style={{ fontSize: 11, fontWeight: 700, color: 'var(--color-text-muted)', textTransform: 'uppercase' }}>
+                        Extracted Optical Character Content
+                      </span>
+                      <button
+                        type="button"
+                        className="btn btn-secondary"
+                        style={{ padding: '4px 8px', fontSize: 11 }}
+                        onClick={handleCopyOcrText}
+                      >
+                        {copiedOcr ? <Check size={12} /> : <Copy size={12} />}
+                        {copiedOcr ? 'Copied' : 'Copy OCR Text'}
+                      </button>
+                    </div>
+                    <div
+                      style={{
+                        background: 'var(--color-surface-2)',
+                        border: '1px solid var(--color-border)',
+                        borderRadius: 'var(--radius-md)',
+                        padding: '14px',
+                        maxHeight: 360,
+                        overflowY: 'auto',
+                        fontSize: 12,
+                        color: 'var(--color-text-primary)',
+                        lineHeight: 1.6,
+                        whiteSpace: 'pre-wrap',
+                        fontFamily: 'monospace',
+                      }}
+                    >
+                      {ocrResult.extracted_text || 'No optical text stream available for this format.'}
+                    </div>
+                  </div>
+                )}
+
+                {/* MODE 3: DEVELOPER JSON VIEW */}
+                {ocrViewMode === 'json' && (
+                  <div>
+                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
+                      <span style={{ fontSize: 11, fontWeight: 700, color: 'var(--color-text-muted)', textTransform: 'uppercase' }}>
+                        Validated JSON Entity Schema
+                      </span>
+                      <div style={{ display: 'flex', gap: 6 }}>
+                        <button
+                          type="button"
+                          className="btn btn-secondary"
+                          style={{ padding: '4px 8px', fontSize: 11 }}
+                          onClick={handleCopyOcrText}
+                        >
+                          {copiedOcr ? <Check size={12} /> : <Copy size={12} />}
+                          {copiedOcr ? 'Copied' : 'Copy'}
+                        </button>
+                        <button
+                          type="button"
+                          className="btn btn-secondary"
+                          style={{ padding: '4px 8px', fontSize: 11 }}
+                          onClick={handleDownloadOcrJson}
+                        >
+                          <Download size={12} />
+                          JSON
+                        </button>
+                      </div>
+                    </div>
                     <div
                       style={{
                         background: 'var(--color-surface-2)',
                         border: '1px solid var(--color-border)',
                         borderRadius: 'var(--radius-md)',
                         padding: '12px',
-                        maxHeight: 300,
+                        maxHeight: 360,
                         overflowY: 'auto',
                       }}
                     >
-                      <pre style={{ fontSize: 11.5, color: 'var(--color-text-primary)' }}>
+                      <pre style={{ fontSize: 11.5, color: 'var(--color-text-primary)', margin: 0, overflowX: 'auto' }}>
                         {JSON.stringify(ocrResult.extracted_data, null, 2)}
                       </pre>
                     </div>
