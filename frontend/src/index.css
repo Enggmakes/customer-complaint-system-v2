@@ -1268,12 +1268,14 @@ tbody td {
 
   .main-content {
     margin-left: 0 !important;
-    width: 100%;
-    height: calc(100vh - 57px);
-    height: calc(100dvh - 57px);
+    width: 100% !important;
+    height: calc(100vh - 57px) !important;
+    height: calc(100dvh - 57px) !important;
     display: flex;
     flex-direction: column;
-    overflow: hidden;
+    overflow-y: auto !important;
+    overflow-x: hidden !important;
+    -webkit-overflow-scrolling: touch;
   }
 
   .page-header {
@@ -1300,6 +1302,7 @@ tbody td {
     width: 100% !important;
     height: 100% !important;
     overflow-y: auto !important;
+    -webkit-overflow-scrolling: touch;
     padding: 16px !important;
   }
 
@@ -1314,6 +1317,8 @@ tbody td {
     border-top: none !important;
     border-left: none !important;
     flex: 1 !important;
+    overflow-y: auto !important;
+    -webkit-overflow-scrolling: touch;
   }
 
   /* Dashboard Stats Grid on Tablet */
@@ -1322,9 +1327,11 @@ tbody td {
     gap: 12px !important;
   }
 
-  .dashboard-page, .ledger-page {
-    padding: 16px !important;
-    overflow-y: auto !important;
+  .dashboard-page, .ledger-page, .ai-tools-page, .datalens-page {
+    padding: 16px 14px 48px !important;
+    overflow-y: visible !important;
+    width: 100% !important;
+    box-sizing: border-box !important;
   }
 }
 
