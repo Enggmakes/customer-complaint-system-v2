@@ -7,6 +7,7 @@ import io
 import re
 import pypdf
 from PIL import Image
+from typing import Optional
 
 try:
     import pytesseract
@@ -53,7 +54,6 @@ def extract_text_from_file(file_bytes: bytes, filename: str) -> str:
             print(f"[PDF READ ERR] {e}")
 
     elif any(fname_lower.endswith(ext) for ext in [".png", ".jpg", ".jpeg", ".bmp", ".tiff"]):
-        # 1. Try EasyOCR for camera photos and document images
         try:
             reader = get_easyocr_reader()
             if reader:
@@ -63,7 +63,6 @@ def extract_text_from_file(file_bytes: bytes, filename: str) -> str:
         except Exception as e:
             print(f"[EASYOCR ERR] {e}")
 
-        # 2. Fallback to Tesseract if EasyOCR failed
         if not extracted_text and HAS_TESSERACT:
             try:
                 image = Image.open(io.BytesIO(file_bytes))
@@ -72,7 +71,7 @@ def extract_text_from_file(file_bytes: bytes, filename: str) -> str:
                 print(f"[OCR TESSERACT WARN] Tesseract binary not configured: {e}")
                 extracted_text = ""
 
-    elif fname_lower.endswith(".txt") or fname_lower.endswith(".csv"):
+    elif fname_lower.endswith(".txt") or fname_lower.endswith(".csv") or fname_lower.endswith(".json") or fname_lower.endswith(".log"):
         try:
             extracted_text = file_bytes.decode("utf-8", errors="ignore").strip()
         except Exception as e:
@@ -81,25 +80,33 @@ def extract_text_from_file(file_bytes: bytes, filename: str) -> str:
     return extracted_text
 
 
+extract_text_file_helper = extract_text_from_file
+
+
 @router.post("/message", response_model=dict)
 async def send_message(payload: ChatMessage, db: Session = Depends(get_db)):
-    """Send a message to the AIVOA Copilot. Returns extracted complaint data + AI response."""
+    """Send a message to ahsi AI Copilot. Processes across all workspaces & operations."""
     session_id = payload.session_id
     user_message = payload.message.strip()
+    workspace = payload.workspace or "general"
+    record_type = payload.record_type or "issue"
 
     if not user_message:
         raise HTTPException(status_code=400, detail="Message cannot be empty")
 
     print(f"\n{'='*60}")
-    print(f"[CHAT] New message for session: {session_id}")
-    print(f"[CHAT] Message: {user_message[:300]}")
+    print(f"[CHAT] Message for session: {session_id} | Workspace: {workspace} | Type: {record_type}")
 
     # Persist user message in chat session
     db.add(ChatSession(session_id=session_id, role="user", content=user_message))
     db.commit()
 
-    # Load existing complaint record from DB to pass current state into graph
+    # Load existing record from DB
     existing = db.query(Complaint).filter(Complaint.session_id == session_id).first()
+
+    existing_batch = existing.batch_lot_number if existing else None
+    if existing_batch and str(existing_batch).strip().lower() in ["ber", "number", "numbers", "no", "num", "id", "null", "none", "n/a"]:
+        existing_batch = None
 
     run_thread_id = f"{session_id}_{uuid.uuid4().hex[:8]}"
 
@@ -107,6 +114,9 @@ async def send_message(payload: ChatMessage, db: Session = Depends(get_db)):
         "messages": [HumanMessage(content=user_message)],
         "session_id": session_id,
         "raw_input": user_message,
+        "workspace": workspace or (existing.workspace if existing else "general"),
+        "record_type": record_type or (existing.record_type if existing else "issue"),
+        "title": existing.title if existing else None,
         "status": existing.status if existing and existing.status else "pending_triage",
         "processing_step": None,
         "error": None,
@@ -114,7 +124,7 @@ async def send_message(payload: ChatMessage, db: Session = Depends(get_db)):
         "customer_name": existing.customer_name if existing else None,
         "product_name": existing.product_name if existing else None,
         "product_strength": existing.product_strength if existing else None,
-        "batch_lot_number": existing.batch_lot_number if existing else None,
+        "batch_lot_number": existing_batch,
         "affected_quantity": existing.affected_quantity if existing else None,
         "manufacturing_date": existing.manufacturing_date if existing else None,
         "expiry_date": existing.expiry_date if existing else None,
@@ -126,18 +136,17 @@ async def send_message(payload: ChatMessage, db: Session = Depends(get_db)):
         "severity": existing.severity if existing else None,
         "suggested_action": existing.suggested_action if existing else None,
         "initial_risk_assessment": existing.initial_risk_assessment if existing else None,
+        "response_draft": existing.response_draft if existing else None,
     }
 
     config = {"configurable": {"thread_id": run_thread_id}}
 
     try:
         result = await complaint_graph.ainvoke(initial_state, config=config)
-        print(f"\n[CHAT] Graph completed.")
     except Exception as e:
         print(f"[CHAT] Agent error: {e}\n{traceback.format_exc()}")
         raise HTTPException(status_code=500, detail=f"Agent error: {str(e)}")
 
-    # Get AI response text from the last AI message
     ai_messages = result.get("messages", [])
     ai_content = ""
     for msg in reversed(ai_messages):
@@ -149,14 +158,14 @@ async def send_message(payload: ChatMessage, db: Session = Depends(get_db)):
             ai_content = msg.content
             break
 
-    print(f"[CHAT] AI response: {ai_content[:200]}")
-
     if ai_content:
         db.add(ChatSession(session_id=session_id, role="assistant", content=ai_content))
         db.commit()
 
-    # Build extracted fields dict from graph result
     extracted = {
+        "workspace": result.get("workspace") or workspace,
+        "record_type": result.get("record_type") or record_type,
+        "title": result.get("title"),
         "complaint_source": result.get("complaint_source"),
         "customer_name": result.get("customer_name"),
         "product_name": result.get("product_name"),
@@ -173,16 +182,11 @@ async def send_message(payload: ChatMessage, db: Session = Depends(get_db)):
         "severity": result.get("severity"),
         "suggested_action": result.get("suggested_action"),
         "initial_risk_assessment": result.get("initial_risk_assessment"),
+        "response_draft": result.get("response_draft"),
         "status": result.get("status", "ready_to_commit"),
         "raw_input": user_message,
     }
 
-    print(f"[CHAT] Extracted fields returned:")
-    for k, v in extracted.items():
-        if v is not None:
-            print(f"  {k}: {str(v)[:80]}")
-
-    # Upsert complaint record in DB
     complaint = db.query(Complaint).filter(Complaint.session_id == session_id).first()
     if complaint:
         for k, v in extracted.items():
@@ -208,39 +212,38 @@ async def send_message(payload: ChatMessage, db: Session = Depends(get_db)):
 @router.post("/upload", response_model=dict)
 async def upload_document(
     session_id: str = Form(...),
+    workspace: Optional[str] = Form("general"),
+    record_type: Optional[str] = Form("issue"),
     file: UploadFile = File(...),
     db: Session = Depends(get_db)
 ):
-    """Upload a PDF, paper image, or document file. Extracts text via PyPDF/OCR engine and parses complaint."""
+    """Upload any document/file (PDF, image, text, invoice) and process through IshaFlow AI."""
     filename = file.filename or "uploaded_document"
     contents = await file.read()
 
-    print(f"\n{'='*60}")
-    print(f"[UPLOAD] File '{filename}' ({len(contents)} bytes) received for session: {session_id}")
+    print(f"[UPLOAD] Received '{filename}' ({len(contents)} bytes) for workspace: {workspace}")
 
     extracted_text = extract_text_from_file(contents, filename)
-
     if not extracted_text:
-        extracted_text = f"Customer submitted defect document '{filename}'. Processing complaint details for QA triage."
+        extracted_text = f"Uploaded document '{filename}'. Processing operations & scope analysis."
 
-    print(f"[UPLOAD] Extracted text ({len(extracted_text)} chars): {extracted_text[:200]}...")
-
-    # Persist user document upload message
-    user_display_msg = f"📄 Uploaded Document: **{filename}**\n\nExtracted Text Content:\n{extracted_text[:300]}..."
+    user_display_msg = f"📄 Uploaded Document: **{filename}**\n\nExtracted Content:\n{extracted_text[:300]}..."
     db.add(ChatSession(session_id=session_id, role="user", content=user_display_msg))
     db.commit()
 
-    existing = db.query(Complaint).filter(Complaint.session_id == session_id).first()
     run_thread_id = f"{session_id}_{uuid.uuid4().hex[:8]}"
 
     initial_state = {
         "messages": [HumanMessage(content=extracted_text)],
         "session_id": session_id,
         "raw_input": extracted_text,
+        "workspace": workspace,
+        "record_type": record_type,
         "status": "pending_triage",
         "processing_step": None,
         "error": None,
-        "complaint_source": None,
+        "title": None,
+        "complaint_source": f"File Upload ({filename})",
         "customer_name": None,
         "product_name": None,
         "product_strength": None,
@@ -256,6 +259,7 @@ async def upload_document(
         "severity": None,
         "suggested_action": None,
         "initial_risk_assessment": None,
+        "response_draft": None,
     }
 
     config = {"configurable": {"thread_id": run_thread_id}}
@@ -278,7 +282,10 @@ async def upload_document(
         db.commit()
 
     extracted = {
-        "complaint_source": result.get("complaint_source"),
+        "workspace": result.get("workspace") or workspace,
+        "record_type": result.get("record_type") or record_type,
+        "title": result.get("title"),
+        "complaint_source": result.get("complaint_source") or f"Document ({filename})",
         "customer_name": result.get("customer_name"),
         "product_name": result.get("product_name"),
         "product_strength": result.get("product_strength"),
@@ -294,6 +301,7 @@ async def upload_document(
         "severity": result.get("severity"),
         "suggested_action": result.get("suggested_action"),
         "initial_risk_assessment": result.get("initial_risk_assessment"),
+        "response_draft": result.get("response_draft"),
         "status": result.get("status", "ready_to_commit"),
         "raw_input": extracted_text,
     }

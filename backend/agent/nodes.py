@@ -5,7 +5,7 @@ import traceback
 from langchain_groq import ChatGroq
 from langchain_core.messages import SystemMessage, HumanMessage, AIMessage
 from dotenv import load_dotenv
-from .state import ComplaintAgentState
+from .state import UniversalAgentState
 
 load_dotenv()
 
@@ -13,8 +13,9 @@ load_dotenv()
 
 def get_primary_llm():
     api_key = os.getenv("GROQ_API_KEY", "")
+    model = os.getenv("PRIMARY_MODEL", "openai/gpt-oss-120b")
     return ChatGroq(
-        model=os.getenv("PRIMARY_MODEL", "llama-3.3-70b-versatile"),
+        model=model,
         api_key=api_key if api_key and api_key != "your_groq_api_key_here" else "dummy_key",
         temperature=0.1,
         max_tokens=2048,
@@ -22,8 +23,9 @@ def get_primary_llm():
 
 def get_fast_llm():
     api_key = os.getenv("GROQ_API_KEY", "")
+    model = os.getenv("FAST_MODEL", "openai/gpt-oss-20b")
     return ChatGroq(
-        model=os.getenv("FAST_MODEL", "llama-3.1-8b-instant"),
+        model=model,
         api_key=api_key if api_key and api_key != "your_groq_api_key_here" else "dummy_key",
         temperature=0.0,
         max_tokens=1024,
@@ -63,290 +65,235 @@ def _safe_json(text: str) -> dict:
                             pass
                     break
 
-    print(f"[WARN] _safe_json: could not parse JSON from text:\n{text[:500]}")
     return {}
 
 
 def _invoke_with_retry(llm, messages, retries=1):
+    fallback_models = ["openai/gpt-oss-120b", "openai/gpt-oss-20b", "qwen/qwen3.6-27b", "groq/compound"]
+    api_key = os.getenv("GROQ_API_KEY", "")
+    
     for attempt in range(retries + 1):
         try:
             response = llm.invoke(messages)
             return response.content
         except Exception as e:
             print(f"[ERROR] LLM invoke attempt {attempt+1} failed: {e}")
+            if attempt < len(fallback_models) and api_key and api_key != "your_groq_api_key_here":
+                alt_model = fallback_models[attempt]
+                print(f"[RETRY] Attempting fallback model: {alt_model}")
+                try:
+                    alt_llm = ChatGroq(model=alt_model, api_key=api_key, temperature=0.1, max_tokens=2048)
+                    response = alt_llm.invoke(messages)
+                    return response.content
+                except Exception as alt_err:
+                    print(f"[RETRY ERROR] Fallback model {alt_model} failed: {alt_err}")
             if attempt == retries:
                 raise
     return ""
 
 
+# ─── Heuristic Pattern Extractors (Multi-Workspace Fallbacks) ────────────────
 
-VALID_CATEGORIES = [
-    "Product Defect - Discoloration",
-    "Product Defect - Particulate",
-    "Product Defect - Packaging",
-    "Product Defect - Odor",
-    "Efficacy Complaint",
-    "Adverse Event",
-    "Label/Documentation Error",
-    "Shortage",
-    "Other"
-]
-
-def _normalize_category(val: str, text: str = "") -> str:
-    if val in VALID_CATEGORIES:
-        return val
-
-    v_lower = (val or "").lower()
-    t_lower = (text or "").lower()
-    combined = f"{v_lower} {t_lower}"
-
-    if any(w in combined for w in ["discolor", "color", "stain", "fade", "yellow"]):
-        return "Product Defect - Discoloration"
-    if any(w in combined for w in ["particulate", "foreign", "particle", "contam", "black spec", "speck", "dust"]):
-        return "Product Defect - Particulate"
-    if any(w in combined for w in ["packag", "seal", "leak", "chip", "crumbl", "break", "broken", "blister", "bottle", "foil", "damaged", "crushed"]):
-        return "Product Defect - Packaging"
-    if any(w in combined for w in ["smell", "odor", "odour", "foul", "stench"]):
-        return "Product Defect - Odor"
-    if any(w in combined for w in ["efficacy", "ineffective", "no effect", "potency", "subtherapeutic"]):
-        return "Efficacy Complaint"
-    if any(w in combined for w in ["adverse", "side effect", "reaction", "icu", "hypoglycemia", "hospital", "toxicity", "death"]):
-        return "Adverse Event"
-    if any(w in combined for w in ["label", "doc", "print", "smudge", "mislabel", "misprint", "carton"]):
-        return "Label/Documentation Error"
-    if any(w in combined for w in ["short", "missing", "count", "quantity mismatch"]):
-        return "Shortage"
-
-    for cat in VALID_CATEGORIES:
-        if cat.lower() in v_lower or v_lower in cat.lower():
-            return cat
-
-    return "Product Defect - Packaging"
+INVALID_BATCH_IDS = {
+    "ber", "number", "numbers", "no", "num", "nums", "id", "ids", "code", "the",
+    "a", "an", "is", "to", "for", "in", "of", "and", "or", "it", "correct",
+    "fix", "change", "update", "set", "batch", "order", "ticket", "lot", "ref",
+    "reference", "as", "check", "modify", "replace", "null", "none", "n/a"
+}
 
 
-def _normalize_date(val: str) -> str:
-    if not val:
-        return val
-    val = val.strip()
-    months = {
-        "jan": "January", "january": "January",
-        "feb": "February", "february": "February",
-        "mar": "March", "march": "March",
-        "apr": "April", "april": "April",
-        "may": "May",
-        "jun": "June", "june": "June",
-        "jul": "July", "july": "July",
-        "aug": "August", "august": "August",
-        "sep": "September", "september": "September", "sept": "September",
-        "oct": "October", "october": "October",
-        "nov": "November", "november": "November",
-        "dec": "December", "december": "December"
-    }
-    parts = val.split()
-    if len(parts) == 2:
-        m_part = parts[0].lower()
-        if m_part in months:
-            return f"{months[m_part]} {parts[1]}"
-    for k, v in months.items():
-        val = re.sub(r'\b' + k + r'\b', v, val, flags=re.IGNORECASE)
-    return val.capitalize() if len(val.split()) == 2 else val
-
-
-def _heuristic_extract(text: str, existing: dict = None) -> dict:
-    """
-    Intelligent fallback parser using NLP pattern matching & state merging.
-    Supports both initial parsing and conversational field modifications.
-    """
-    print(f"[HEURISTIC PARSER] Processing text with state context...")
-    res = dict(existing) if existing else {}
-
+def _detect_workspace_and_type(text: str, default_ws: str = None, default_type: str = None):
     t_lower = text.lower()
-    update_keywords = [
-        "change", "update", "set", "correct", "modify", "replace", 
-        "expire date", "expiry date", "mfg date", "manufacturing date",
-        "quantity", "affected quantity", "risk", "severity", "strength", "improve"
-    ]
-    is_modification = any(kw in t_lower for kw in update_keywords) and bool(res.get("product_name"))
+    ws = default_ws or "general"
+    rtype = default_type or "issue"
 
-    has_expiry_kw = bool(re.search(r"\b(?:expiry|expire|exp|expiration)\b", text, re.IGNORECASE))
-    has_mfg_kw = bool(re.search(r"\b(?:manufacturing|mfg|mfd|manufacture)\b", text, re.IGNORECASE))
+    # Workspace detection
+    if any(k in t_lower for k in ["order", "shipping", "refund", "return", "package", "tracking", "amazon", "shopify", "ecommerce", "cart", "courier", "fedex", "ups"]):
+        ws = "ecommerce"
+    elif any(k in t_lower for k in ["bug", "crash", "error", "api", "latency", "server", "code", "database", "stack", "frontend", "backend", "deploy", "ui", "login failure", "endpoint"]):
+        ws = "tech_saas"
+    elif any(k in t_lower for k in ["proposal", "quote", "freelance", "develop website", "design logo", "hourly", "consulting", "brief", "milestone", "client project", "scope of work"]):
+        ws = "services_freelance"
+    elif any(k in t_lower for k in ["capsule", "tablet", "pharma", "batch", "mg", "expiry", "dosage", "adverse", "patient", "clinic", "hospital", "doctor", "prescription"]):
+        ws = "healthcare_pharma"
+    elif any(k in t_lower for k in ["machine", "raw material", "assembly", "factory", "warehouse", "supply chain", "conveyor", "defect in batch", "manufacturing site"]):
+        ws = "manufacturing"
 
-    # 1. Expiry Date update/extract (Only target expiry date if expiry is mentioned or in initial parsing)
-    if has_expiry_kw or not is_modification:
-        exp_patterns = [
-            r"(?:change|update|set|modify)?\s*(?:expiry|expire|exp|expiration)\s*date\s*(?:to|is|=|\s)*([A-Za-z]+\s+\d{4}|\d{1,2}/\d{4}|\d{4}-\d{2}|[A-Za-z]{3,9}\s*\d{2,4})",
-            r"(?:expiry|expire|exp|expiration)\s*date[\s:]*([A-Za-z]+\s+\d{4}|\d{1,2}/\d{4}|\d{4}-\d{2})",
-            r"\bexp(?:iry)?[\s:]*([A-Za-z]+\s+\d{4}|\d{1,2}/\d{4}|\d{4}-\d{2})"
-        ]
-        for p in exp_patterns:
-            exp_match = re.search(p, text, re.IGNORECASE)
-            if exp_match:
-                res["expiry_date"] = _normalize_date(exp_match.group(1))
-                break
+    # Record type detection
+    if any(k in t_lower for k in ["proposal", "quotation", "quote", "estimate", "scope of work", "project cost", "how much for", "pricing for"]):
+        rtype = "proposal"
+    elif any(k in t_lower for k in ["service", "need", "request", "build", "hire", "schedule", "book", "consultation", "feature request"]):
+        rtype = "service_request"
+    elif any(k in t_lower for k in ["inquiry", "question", "how does", "information regarding", "status check"]):
+        rtype = "inquiry"
+    elif any(k in t_lower for k in ["complaint", "issue", "bug", "broken", "damaged", "failed", "discolor", "leak", "problem", "defect", "error"]):
+        rtype = "issue"
 
-    # 2. Manufacturing Date update/extract (Only target mfg date if mfg is mentioned or in initial parsing without expiry override)
-    if has_mfg_kw or (not is_modification and not has_expiry_kw):
-        mfg_patterns = [
-            r"(?:change|update|set|modify)?\s*(?:manufacturing|mfg|mfd|manufacture)\s*date\s*(?:to|is|=|\s)*([A-Za-z]+\s+\d{4}|\d{1,2}/\d{4}|\d{4}-\d{2}|[A-Za-z]{3,9}\s*\d{2,4})",
-            r"(?:manufacturing|mfg|mfd|manufacture)\s*date[\s:]*([A-Za-z]+\s+\d{4}|\d{1,2}/\d{4}|\d{4}-\d{2})",
-            r"\bmfg[\s:]*([A-Za-z]+\s+\d{4}|\d{1,2}/\d{4}|\d{4}-\d{2})"
-        ]
-        for p in mfg_patterns:
-            mfg_match = re.search(p, text, re.IGNORECASE)
-            if mfg_match:
-                res["manufacturing_date"] = _normalize_date(mfg_match.group(1))
-                break
+    return ws, rtype
 
-    # 3. Batch / Lot Number update/extract
-    batch_patterns = [
-        r"(?:batch|lot)\s*(?:/|\s)*\s*(?:lot|batch)?\s*(?:number|no|num|\#)?\s*[\:\=]\s*([A-Za-z0-9\-]+)",
-        r"(?:change|update|set|modify)\s*(?:batch|lot)\s*(?:number|no|num|\#)?\s*(?:to|is|=|\s)+\s*([A-Za-z0-9\-]+)",
-        r"\b(?:batch|lot)\s+(?:no|num|number|\#)?\s*([A-Z0-9\-]{3,15})\b",
-    ]
-    batch_found = False
-    for bp in batch_patterns:
-        bm = re.search(bp, text, re.IGNORECASE)
-        if bm:
-            val = bm.group(1).strip()
-            val = re.sub(r"^(?:to|is|=|changed?\s*to|updated?\s*to)\s+", "", val, flags=re.IGNORECASE).strip()
-            if val and val.lower() not in ["number", "no", "num", "ber", "lot"]:
-                res["batch_lot_number"] = val
-                batch_found = True
-                break
 
-    if not batch_found and not res.get("batch_lot_number"):
-        standalone_batch = re.search(r"\b([A-Z]{2,4}\d{4,8})\b", text)
-        if standalone_batch:
-            res["batch_lot_number"] = standalone_batch.group(1).strip()
+def _heuristic_universal_extract(text: str, existing: dict = None, workspace: str = "general", record_type: str = "issue") -> dict:
+    res = dict(existing) if existing else {}
+    t_lower = text.lower()
 
-    # 4. Customer / Company Name & Source
-    cust_patterns = [
-        r"(?:customer|client|company|comapny)\s*(?:name)?\s*[\:\=]\s*([A-Za-z0-9\s\.\-']{2,40})",
-        r"(?:change|update|set|modify)\s*(?:customer|client|company|comapny)\s*(?:name)?\s*(?:to|is|=|\s)+\s*([A-Za-z0-9\s\.\-']{2,40})",
-    ]
-    cust_updated = False
-    for cp in cust_patterns:
-        cm = re.search(cp, text, re.IGNORECASE)
-        if cm:
-            val = cm.group(1).strip()
-            val = re.sub(r"^(?:to|is|=|changed?\s*to|updated?\s*to)\s+", "", val, flags=re.IGNORECASE).strip()
-            val = val.split('\n')[0].split('.')[0].split(',')[0].strip()
-            if val and val.lower() not in ["name", "is", "to"]:
-                res["customer_name"] = val
-                cust_updated = True
-                break
+    # Sanitize existing invalid batch number artifacts
+    if res.get("batch_lot_number") and str(res.get("batch_lot_number")).strip().lower() in INVALID_BATCH_IDS:
+        res.pop("batch_lot_number", None)
 
-    if not cust_updated and not res.get("customer_name"):
-        customer_match = re.search(r"\b([A-Z][a-zA-Z0-9\s\.\-']+(?:Pharmacy|Hospital|Clinic|Distributor|Store|Medical|1mg|Pharma|Labs|Retail))\b", text, re.IGNORECASE)
-        if customer_match:
-            res["customer_name"] = customer_match.group(1).strip()
+    # 1. Detect Customer / Client
+    cust_match = re.search(r"(?:customer|client|from|reported by|user|buyer|patient)\s*(?:is|to|[:=])?\s*([A-Za-z0-9\s\.\-']{2,40})", text, re.IGNORECASE)
+    if cust_match:
+        val = cust_match.group(1).strip().split('\n')[0].split('.')[0].strip()
+        if val.lower() not in ["the", "a", "an", "is", "to", "from"]:
+            res["customer_name"] = val
+    elif not res.get("customer_name"):
+        if workspace == "ecommerce":
+            res["customer_name"] = "Online Shopper"
+        elif workspace == "services_freelance":
+            res["customer_name"] = "Prospective Client"
+        elif workspace == "tech_saas":
+            res["customer_name"] = "SaaS Enterprise User"
+        elif workspace == "healthcare_pharma":
+            res["customer_name"] = "Apollo Pharmacy"
+        else:
+            res["customer_name"] = "General Client"
 
-    if res.get("customer_name"):
-        c_lower = res["customer_name"].lower()
-        if "pharmacy" in c_lower or "1mg" in c_lower or "store" in c_lower or "retail" in c_lower:
-            res["complaint_source"] = "Pharmacy"
-        elif "hospital" in c_lower or "clinic" in c_lower:
-            res["complaint_source"] = "Hospital"
-        elif "distributor" in c_lower or "wholesaler" in c_lower:
-            res["complaint_source"] = "Distributor"
+    # 2. Detect Product / Service / Project Title
+    prod_match = re.search(r"(?:product|item|service|project|software|system)\s*(?:is|to|[:=])?\s*([A-Za-z0-9\s\.\-']{2,50})", text, re.IGNORECASE)
+    if prod_match:
+        val = prod_match.group(1).strip().split('\n')[0].split('.')[0].strip()
+        if val.lower() not in ["the", "a", "an", "is", "to"]:
+            res["product_name"] = val
+    elif not res.get("product_name"):
+        if workspace == "ecommerce":
+            res["product_name"] = "Wireless Earbuds Pro"
+        elif workspace == "services_freelance":
+            res["product_name"] = "Full-Stack Web App Development"
+        elif workspace == "tech_saas":
+            res["product_name"] = "Authentication & Billing Module"
+        elif workspace == "healthcare_pharma":
+            res["product_name"] = "Amoxicillin Capsules 500mg"
+        else:
+            res["product_name"] = "Operations Workflow Request"
 
-    # 5. Product Name & Strength
-    prod_name_match = re.search(r"(?:change|update|set|modify)?\s*(?:product|drug)\s+name\s*(?:to|is|=|\s)+\s*([A-Za-z0-9\s\.\-']{2,40})", text, re.IGNORECASE)
-    if prod_name_match:
-        p_val = prod_name_match.group(1).strip()
-        p_val = re.sub(r"^(?:to|is|=|changed?\s*to|updated?\s*to)\s+", "", p_val, flags=re.IGNORECASE).strip()
-        p_val = p_val.split('.')[0].split(',')[0].strip()
-        if p_val and len(p_val) > 1:
-            res["product_name"] = p_val
+    # 3. Detect Order ID / Batch / Ticket ID / Direct Correction
+    extracted_batch = None
 
-    strength_match = re.search(r"(?:change|update|set)?\s*(?:product\s*)?strength\s*(?:to|is|=|\s)*(\d+\s*(?:mg|g|mcg|ml|iu|%))", text, re.IGNORECASE)
-    if strength_match:
-        res["product_strength"] = strength_match.group(1).strip()
-    else:
-        st_match2 = re.search(r"\b(\d+\s*(?:mg|g|mcg|ml|iu|%))\b", text, re.IGNORECASE)
-        if st_match2:
-            res["product_strength"] = st_match2.group(1).strip()
-
-    if not res.get("product_name"):
-        drugs = ["Amoxicillin", "Paracetamol", "Ibuprofen", "Ciprofloxacin", "Metformin", "Azithromycin", "Omeprazole", "Aspirin"]
-        for d in drugs:
-            if re.search(r"\b" + d + r"\b", text, re.IGNORECASE):
-                res["product_name"] = f"{d} Capsules"
-                break
-
-    # 6. Affected Quantity (Handles commands like "quantity are change to 56", "change quantity to 56", "affected quantity 56")
-    qty_val = None
-    qty_unit = None
-    valid_units = ["capsules", "tablets", "bottles", "vials", "blisters", "units", "packs", "boxes", "sachets", "ampoules", "syringes", "containers"]
-
-    q_match1 = re.search(
-        r"(?:change|update|set|modify)?\s*(?:affected\s*)?quantity\s*(?:are|is|to|=|changed?\s*to|updated?\s*to|\s)+(\d+)\s*([a-zA-Z]*)",
+    # 3a. Direct correction pattern (e.g. "correct batch number amx56584", "change batch to amx56584", "update batch #AMX-102")
+    corr_match = re.search(
+        r"(?:correct|change|update|fix|set|modify|replace)\s+(?:the\s+)?(?:batch|order|ticket|lot|reference|ref|work\s*order)?\s*(?:number|no\b|num\b|id\b|#)?\s*(?:to|is|as|[:=])?\s*([A-Za-z0-9\-_]+)",
         text,
         re.IGNORECASE
     )
-    if q_match1:
-        qty_val = q_match1.group(1).strip()
-        raw_u = q_match1.group(2).strip().lower()
-        if raw_u in valid_units:
-            qty_unit = raw_u
+    if corr_match:
+        val = corr_match.group(1).strip()
+        if val.lower() not in INVALID_BATCH_IDS and len(val) >= 2:
+            extracted_batch = val.upper() if len(val) <= 14 else val
 
-    if not qty_val:
-        q_match_affected = re.search(r"(\d+)\s*(" + "|".join(valid_units) + r")\b", text, re.IGNORECASE)
-        if q_match_affected:
-            qty_val = q_match_affected.group(1).strip()
-            qty_unit = q_match_affected.group(2).strip()
+    # 3b. Standard labeled pattern (e.g. "batch number AMX240602", "batch #AMX240602", "order #ORD-991", "ticket TK-1234")
+    if not extracted_batch:
+        id_match = re.search(
+            r"(?:order|batch|ticket|invoice|tracking|lot|work\s*order|ref|reference)\s*(?:(?:number|no\b|num\b|id\b|#)\s*)?(?:is|to|[:=#])?\s*([A-Za-z0-9\-_]+)",
+            text,
+            re.IGNORECASE
+        )
+        if id_match:
+            val = id_match.group(1).strip()
+            if val.lower() not in INVALID_BATCH_IDS and len(val) >= 2:
+                extracted_batch = val.upper() if len(val) <= 14 else val
 
-    if not qty_val:
-        q_match3 = re.search(r"\bquantity[\s:]+(\d+)\b", text, re.IGNORECASE)
-        if q_match3:
-            qty_val = q_match3.group(1).strip()
+    # 3c. Standalone alphanumeric identifier pattern (e.g. "AMX56584", "AMX240602", "ORD-2026-9041", "#88201")
+    if not extracted_batch:
+        standalone_id = re.search(r"\b([A-Za-z]{2,6}[-_]?\d{3,8}|#\d{4,8})\b", text)
+        if standalone_id:
+            val = standalone_id.group(1).strip()
+            if val.lower() not in INVALID_BATCH_IDS:
+                extracted_batch = val.upper()
 
-    if qty_val:
-        if not qty_unit:
-            existing_qty = existing.get("affected_quantity", "") if existing else ""
-            exist_unit = re.search(r"\b(" + "|".join(valid_units) + r")\b", existing_qty, re.IGNORECASE)
-            if exist_unit:
-                qty_unit = exist_unit.group(1)
-            else:
-                qty_unit = "capsules"
-        res["affected_quantity"] = f"{qty_val} {qty_unit}"
+    if extracted_batch:
+        res["batch_lot_number"] = extracted_batch
+    elif not res.get("batch_lot_number"):
+        res["batch_lot_number"] = "ORD-2026-9041" if workspace == "ecommerce" else "AMX240602" if workspace == "healthcare_pharma" else "TK-8820"
 
-    # 7. Severity Update
-    sev_match = re.search(r"\b(?:severity|risk\s*level)\s*(?:is|to|=|changed?\s*to|set\s*to)?\s*(critical|major|minor)\b", text, re.IGNORECASE)
-    if sev_match:
-        res["severity"] = sev_match.group(1).capitalize()
+    # 4. Detect Quantity / Budget / Scope
+    qty_match = re.search(r"(\d+)\s*(capsules|tablets|units|items|hours|days|pages|licenses|pcs)\b", text, re.IGNORECASE)
+    budget_match = re.search(r"(\$\s*[\d,]+|\b\d+\s*USD|\b\d+\s*EUR|\bINR\s*[\d,]+|\bRs\.\s*[\d,]+)", text, re.IGNORECASE)
+    if qty_match:
+        res["affected_quantity"] = f"{qty_match.group(1)} {qty_match.group(2)}"
+    elif budget_match:
+        res["affected_quantity"] = budget_match.group(1).strip()
+    elif not res.get("affected_quantity"):
+        res["affected_quantity"] = "1 unit" if record_type == "issue" else "30 Estimated Hours"
 
-    # 8. Defect Category Update
-    if "discolor" in t_lower or "color" in t_lower:
-        res["complaint_category"] = "Product Defect - Discoloration"
-    elif "particulate" in t_lower or "foreign" in t_lower or "particle" in t_lower:
-        res["complaint_category"] = "Product Defect - Particulate"
-    elif "packag" in t_lower or "seal" in t_lower or "leak" in t_lower:
-        res["complaint_category"] = "Product Defect - Packaging"
-    elif "smell" in t_lower or "odor" in t_lower:
-        res["complaint_category"] = "Product Defect - Odor"
+    # 5. Detect Dates (Mfg / Start Date / Deadline)
+    date_match = re.search(r"\b(january|february|march|april|may|june|july|august|september|october|november|december)\s+\d{4}\b", text, re.IGNORECASE)
+    if date_match:
+        res["manufacturing_date"] = date_match.group(0).capitalize()
+    if not res.get("manufacturing_date"):
+        res["manufacturing_date"] = "March 2026"
+    if not res.get("expiry_date"):
+        res["expiry_date"] = "December 2027" if workspace == "healthcare_pharma" else "Within 14 Days"
 
-    # Set defaults for initial missing fields
-    if not res.get("complaint_source"): res["complaint_source"] = "Pharmacy"
-    if not res.get("customer_name"): res["customer_name"] = "Apollo Pharmacy"
-    if not res.get("product_name"): res["product_name"] = "Amoxicillin Capsules"
-    if not res.get("product_strength"): res["product_strength"] = "500 mg"
-    if not res.get("batch_lot_number"): res["batch_lot_number"] = "AMX240602"
-    if not res.get("affected_quantity"): res["affected_quantity"] = "12 capsules"
-    if not res.get("manufacturing_date"): res["manufacturing_date"] = "March 2026"
-    if not res.get("expiry_date"): res["expiry_date"] = "February 2028"
-    if not res.get("complaint_category"): res["complaint_category"] = "Product Defect - Discoloration"
+    # 6. Severity / Priority
+    if any(k in t_lower for k in ["critical", "urgent", "emergency", "blocker", "p0", "p1"]):
+        res["severity"] = "Critical"
+    elif any(k in t_lower for k in ["major", "high", "important", "p2"]):
+        res["severity"] = "Major"
+    elif any(k in t_lower for k in ["minor", "low", "trivial", "p4"]):
+        res["severity"] = "Minor"
+    elif not res.get("severity"):
+        res["severity"] = "Major"
 
-    if not is_modification or not res.get("complaint_description"):
-        res["complaint_description"] = f"{res.get('customer_name', 'Customer')} reported {res.get('complaint_category', 'defect').lower()} in {res.get('product_name', 'product')}. Requesting QA investigation and replacement."
+    # 7. Category
+    if workspace == "ecommerce":
+        res["complaint_category"] = "Shipping Delay & Damage" if "delay" in t_lower or "damag" in t_lower else "Return & Refund Request"
+    elif workspace == "services_freelance":
+        res["complaint_category"] = "Web & Mobile Development Quote" if "web" in t_lower or "app" in t_lower else "Custom Consulting & Scope"
+    elif workspace == "tech_saas":
+        res["complaint_category"] = "Application Crash / API Error" if "crash" in t_lower or "api" in t_lower else "Feature Request & Enhancement"
+    elif workspace == "healthcare_pharma":
+        res["complaint_category"] = "Product Quality / Discoloration" if "discolor" in t_lower or "defect" in t_lower else "Quality Assurance & Supply"
+    else:
+        res["complaint_category"] = "Operations Request"
+
+    # 8. Description & Summary
+    is_field_correction = any(k in t_lower for k in ["correct", "change", "update", "fix", "set batch", "batch number"])
+    if not res.get("complaint_description") or (is_field_correction and len(res.get("complaint_description", "")) < 20):
+        if not is_field_correction:
+            res["complaint_description"] = text.strip() or f"{res.get('customer_name')} submitted a {record_type} for {res.get('product_name')}."
+
+    if not res.get("defect_summary"):
+        res["defect_summary"] = f"[{workspace.upper()}] {record_type.title()}: {res.get('customer_name')} regarding '{res.get('product_name')}' ({res.get('batch_lot_number')}). Category: {res.get('complaint_category')}."
+
+    if not res.get("originating_site"):
+        sites = {
+            "ecommerce": "Fulfillment Center East (Warehouse 4)",
+            "tech_saas": "Production Cloud Cluster (US-East-1)",
+            "services_freelance": "Digital Solutions & Engineering Unit",
+            "healthcare_pharma": "Block A - Primary Manufacturing",
+            "manufacturing": "Assembly Line 3 - Precision Plant",
+            "general": "Corporate Operations Hub"
+        }
+        res["originating_site"] = sites.get(workspace, "Operations Hub")
+
+    if not res.get("impacted_npm"):
+        npms = {
+            "ecommerce": "Secondary Packaging & Courier Box",
+            "tech_saas": "REST API Gateway & Postgres DB",
+            "services_freelance": "Frontend React UI & Stripe Payment Integration",
+            "healthcare_pharma": "Primary packaging (HDPE bottle)",
+            "manufacturing": "Hydraulic Pressure Seal",
+            "general": "Core Deliverables & Specifications"
+        }
+        res["impacted_npm"] = npms.get(workspace, "Core Deliverables")
 
     return res
 
 
-# ─── Node 1: Parse Complaint ──────────────────────────────────────────────────
+# ─── Node 1: Universal Intake & Intent Router ─────────────────────────────────
 
-def parse_complaint_node(state: ComplaintAgentState) -> dict:
-    """Extract structured complaint data or update existing state from user input."""
+def parse_complaint_node(state: UniversalAgentState) -> dict:
+    """Dynamically parses and extracts structured operational data across any workspace & record type."""
     raw_input = state.get("raw_input", "")
     if not raw_input:
         messages = list(state.get("messages", []))
@@ -354,12 +301,30 @@ def parse_complaint_node(state: ComplaintAgentState) -> dict:
             last = messages[-1]
             raw_input = last.content if hasattr(last, "content") else str(last)
 
+    active_ws = state.get("workspace") or "general"
+    active_type = state.get("record_type") or "issue"
+
+    detected_ws, detected_type = _detect_workspace_and_type(raw_input, active_ws, active_type)
+    if active_ws == "general" and detected_ws != "general":
+        active_ws = detected_ws
+    if active_type == "issue" and detected_type != "issue":
+        active_type = detected_type
+
+    print(f"\n[NODE 1] Universal Intake — Workspace: {active_ws}, Record Type: {active_type}")
+
+    existing_batch = state.get("batch_lot_number")
+    if existing_batch and str(existing_batch).strip().lower() in INVALID_BATCH_IDS:
+        existing_batch = None
+
     existing_fields = {
+        "workspace": active_ws,
+        "record_type": active_type,
+        "title": state.get("title"),
         "complaint_source": state.get("complaint_source"),
         "customer_name": state.get("customer_name"),
         "product_name": state.get("product_name"),
         "product_strength": state.get("product_strength"),
-        "batch_lot_number": state.get("batch_lot_number"),
+        "batch_lot_number": existing_batch,
         "affected_quantity": state.get("affected_quantity"),
         "manufacturing_date": state.get("manufacturing_date"),
         "expiry_date": state.get("expiry_date"),
@@ -371,42 +336,39 @@ def parse_complaint_node(state: ComplaintAgentState) -> dict:
         "severity": state.get("severity"),
         "suggested_action": state.get("suggested_action"),
         "initial_risk_assessment": state.get("initial_risk_assessment"),
+        "response_draft": state.get("response_draft"),
     }
     existing_clean = {k: v for k, v in existing_fields.items() if v is not None}
 
-    print(f"\n[NODE 1] parse_complaint — input: {raw_input[:200]}")
-    print(f"[NODE 1] Existing state fields: {list(existing_clean.keys())}")
+    system_prompt = f"""You are ahsi AI, an intelligent Operations & Workflow assistant.
+ACTIVE WORKSPACE: {active_ws}
+RECORD TYPE: {active_type}
 
-    system_prompt = f"""You are an AI assistant for a pharmaceutical Quality Management System (QMS).
-You extract or update structured complaint data.
-
-CURRENT RECORD STATE:
-{json.dumps(existing_clean, indent=2)}
-
-INSTRUCTIONS:
-1. If the user message is a NEW complaint, extract all structured fields.
-   - IMPORTANT: 'complaint_category' MUST BE EXACTLY ONE OF: 'Product Defect - Discoloration', 'Product Defect - Particulate', 'Product Defect - Packaging', 'Product Defect - Odor', 'Efficacy Complaint', 'Adverse Event', 'Label/Documentation Error', 'Shortage', 'Other'.
-2. If the user message is a MODIFICATION / CORRECTION (e.g. 'change expiry date to Feb 2029', 'quantity are change to 56', 'improve initial risk assessment', 'change severity to critical'):
-   - PRESERVE all existing fields unless explicitly requested to update.
-   - IMPORTANT: 'manufacturing_date' and 'expiry_date' are SEPARATE fields. Updating expiry_date MUST NOT change manufacturing_date, and updating manufacturing_date MUST NOT change expiry_date.
-   - For quantity updates, keep or preserve the unit (e.g. '56 capsules').
-
-Return ONLY a JSON object:
+Extract or update all relevant structured fields from the user input.
+CRITICAL INSTRUCTIONS FOR CORRECTIONS & UPDATES:
+1. If the user is providing a field correction or update (e.g. 'correct batch number amx56584' or 'change client name to Apollo'):
+   - Set that exact field accurately (e.g. batch_lot_number = 'AMX56584').
+   - KEEP and PRESERVE all existing fields from Current State unchanged!
+2. Never extract word fragments like 'ber', 'number', 'num', or 'id' as the batch_lot_number.
+3. Return ONLY a valid JSON object matching:
 {{
-  "complaint_source": "Pharmacy",
-  "customer_name": "Apollo Pharmacy",
-  "product_name": "Amoxicillin Capsules",
-  "product_strength": "500 mg",
-  "batch_lot_number": "AMX240602",
-  "affected_quantity": "12 capsules",
-  "manufacturing_date": "February 2026",
-  "expiry_date": "January 2029",
-  "complaint_category": "Product Defect - Discoloration",
-  "complaint_description": "Description string",
-  "severity": "Major"
+  "workspace": "{active_ws}",
+  "record_type": "{active_type}",
+  "title": "Descriptive title",
+  "complaint_source": "Source channel",
+  "customer_name": "Customer / Client name",
+  "product_name": "Product / Service name",
+  "product_strength": "Version / Strength / Tier",
+  "batch_lot_number": "Batch # / Order ID / Reference #",
+  "affected_quantity": "Quantity / Budget / Hours",
+  "manufacturing_date": "Date",
+  "expiry_date": "Deadline",
+  "complaint_category": "Category",
+  "complaint_description": "Full description",
+  "severity": "Critical | Major | Moderate | Minor"
 }}"""
 
-    human_prompt = f"User input:\n{raw_input}"
+    human_prompt = f"User Input:\n{raw_input}\nCurrent State:\n{json.dumps(existing_clean, indent=2)}"
 
     data = {}
     llm_success = False
@@ -419,251 +381,227 @@ Return ONLY a JSON object:
                 SystemMessage(content=system_prompt),
                 HumanMessage(content=human_prompt)
             ])
-            print(f"[NODE 1] LLM raw response:\n{content[:800]}")
             data = _safe_json(content)
-            if data and (data.get("product_name") or data.get("customer_name") or data.get("manufacturing_date") or data.get("expiry_date") or data.get("affected_quantity")):
+            if data and (data.get("product_name") or data.get("customer_name") or data.get("batch_lot_number")):
                 llm_success = True
-                print(f"[NODE 1] Parsed via Groq LLM: {json.dumps(data, indent=2)}")
         except Exception as e:
-            print(f"[NODE 1] Groq API call failed ({e}). Falling back to heuristic parser.")
+            print(f"[NODE 1] LLM call failed: {e}. Falling back to universal heuristic parser.")
 
     if not llm_success:
-        print("[NODE 1] Running heuristic state-merging parser...")
-        data = _heuristic_extract(raw_input, existing=existing_clean)
+        data = _heuristic_universal_extract(raw_input, existing=existing_clean, workspace=active_ws, record_type=active_type)
 
-    # Merge extracted data over existing clean state
     merged = dict(existing_clean)
     for k, v in data.items():
         if v is not None and v != "":
+            # Avoid overwriting with invalid placeholder fragments
+            if k == "batch_lot_number" and (str(v).strip().lower() in INVALID_BATCH_IDS or len(str(v).strip()) < 2):
+                continue
             merged[k] = v
 
-    result = {
-        "complaint_source": merged.get("complaint_source") or "Pharmacy",
-        "customer_name": merged.get("customer_name") or "Apollo Pharmacy",
-        "product_name": merged.get("product_name") or "Amoxicillin Capsules",
-        "product_strength": merged.get("product_strength") or "500 mg",
-        "batch_lot_number": merged.get("batch_lot_number") or "AMX240602",
-        "affected_quantity": merged.get("affected_quantity") or "12 capsules",
-        "manufacturing_date": merged.get("manufacturing_date") or "March 2026",
-        "expiry_date": merged.get("expiry_date") or "February 2028",
-        "originating_site": merged.get("originating_site"),
-        "impacted_npm": merged.get("impacted_npm"),
-        "complaint_category": _normalize_category(merged.get("complaint_category"), raw_input),
-        "complaint_description": merged.get("complaint_description") or "Customer reported quality issue.",
-        "severity": merged.get("severity"),
-        "suggested_action": merged.get("suggested_action"),
-        "initial_risk_assessment": merged.get("initial_risk_assessment"),
-        "processing_step": "parsed",
-    }
-    print(f"[NODE 1] Final Merged Result: {result}")
-    return result
+    # Final sanity check on batch_lot_number
+    final_batch = merged.get("batch_lot_number")
+    if not final_batch or str(final_batch).strip().lower() in INVALID_BATCH_IDS:
+        final_batch = "AMX240602" if active_ws == "healthcare_pharma" else "ORD-2026-9041" if active_ws == "ecommerce" else "TK-8820"
+        merged["batch_lot_number"] = final_batch
 
-
-# ─── Node 2: Classify Facility & NPM ─────────────────────────────────────────
-
-def classify_facility_node(state: ComplaintAgentState) -> dict:
-    """Classify originating site block and impacted non-product materials."""
-    product_name = state.get("product_name") or "Amoxicillin Capsules"
-    complaint_category = state.get("complaint_category") or "Product Defect - Discoloration"
-    complaint_description = state.get("complaint_description") or ""
-    batch = state.get("batch_lot_number") or "AMX240602"
-
-    print(f"\n[NODE 2] classify_facility — product: {product_name}, category: {complaint_category}")
-
-    system_prompt = """You are a pharmaceutical manufacturing expert. Classify the manufacturing site and impacted materials.
-Return ONLY a JSON object:
-
-{
-  "originating_site": "Block A - Primary Manufacturing",
-  "impacted_npm": "Primary packaging (HDPE bottle)"
-}"""
-
-    human_prompt = f"Product: {product_name}\nBatch: {batch}\nDefect category: {complaint_category}\nDescription: {complaint_description}"
-
-    data = {}
-    api_key = os.getenv("GROQ_API_KEY", "")
-    if api_key and api_key != "your_groq_api_key_here":
-        try:
-            llm = get_fast_llm()
-            content = _invoke_with_retry(llm, [
-                SystemMessage(content=system_prompt),
-                HumanMessage(content=human_prompt)
-            ])
-            data = _safe_json(content)
-        except Exception as e:
-            print(f"[NODE 2] LLM call failed ({e}). Using default classification.")
-
-    site = state.get("originating_site") or data.get("originating_site") or "Block A - Primary Manufacturing"
-    npm = state.get("impacted_npm") or data.get("impacted_npm") or "Primary packaging (HDPE bottle)"
+    title = merged.get("title") or f"{merged.get('product_name', 'Request')} - {merged.get('customer_name', 'Client')}"
 
     return {
-        "originating_site": site,
-        "impacted_npm": npm,
-        "processing_step": "facility_classified",
+        "workspace": active_ws,
+        "record_type": active_type,
+        "title": title,
+        "complaint_source": merged.get("complaint_source") or "ahsi Portal",
+        "customer_name": merged.get("customer_name") or "Valued Client",
+        "product_name": merged.get("product_name") or "General Business Service",
+        "product_strength": merged.get("product_strength") or "Standard Tier",
+        "batch_lot_number": merged.get("batch_lot_number") or final_batch,
+        "affected_quantity": merged.get("affected_quantity") or "1 unit",
+        "manufacturing_date": merged.get("manufacturing_date") or "March 2026",
+        "expiry_date": merged.get("expiry_date") or "Within 14 Days",
+        "originating_site": merged.get("originating_site"),
+        "impacted_npm": merged.get("impacted_npm"),
+        "complaint_category": merged.get("complaint_category") or "Operations Request",
+        "complaint_description": merged.get("complaint_description") or raw_input,
+        "severity": merged.get("severity") or "Major",
+        "suggested_action": merged.get("suggested_action"),
+        "initial_risk_assessment": merged.get("initial_risk_assessment"),
+        "response_draft": merged.get("response_draft"),
+        "processing_step": "parsed",
     }
 
 
-# ─── Node 3: Defect Analysis ──────────────────────────────────────────────────
 
-def defect_analysis_node(state: ComplaintAgentState) -> dict:
-    """Generate formal QMS-structured defect summary."""
-    product = state.get("product_name") or "Amoxicillin Capsules"
-    strength = state.get("product_strength") or "500 mg"
-    batch = state.get("batch_lot_number") or "AMX240602"
-    category = state.get("complaint_category") or "Product Defect - Discoloration"
-    customer = state.get("customer_name") or "Apollo Pharmacy"
-    qty = state.get("affected_quantity") or "12 capsules"
-    site = state.get("originating_site") or "Block A - Primary Manufacturing"
-    npm = state.get("impacted_npm") or "Primary packaging (HDPE bottle)"
-    mfg = state.get("manufacturing_date") or ""
-    exp = state.get("expiry_date") or ""
+# ─── Node 2: Department & Resource Mapping ───────────────────────────────────
 
-    print(f"\n[NODE 3] defect_analysis — product: {product}, batch: {batch}")
+def classify_facility_node(state: UniversalAgentState) -> dict:
+    """Maps originating department, facility, tech stack, and impacted deliverables."""
+    workspace = state.get("workspace") or "general"
+    product = state.get("product_name") or "Service"
+    rec_type = state.get("record_type") or "issue"
 
-    summary = f"Formal QMS Defect Summary: {customer} submitted complaint regarding {category.lower()} in {product} ({strength}), Batch #{batch}. Mfg Date: {mfg}, Expiry Date: {exp}. Quantity: {qty}. Originating site: {site}. Impacted NPM: {npm}."
+    facility_map = {
+        "ecommerce": "Fulfillment Center East (Warehouse 4)",
+        "tech_saas": "Production Cloud Cluster (US-East-1)",
+        "services_freelance": "Digital Solutions & Engineering Unit",
+        "healthcare_pharma": "Block A - Primary Manufacturing",
+        "manufacturing": "Assembly Line 3 - Precision Plant",
+        "general": "Corporate Operations Hub",
+    }
+
+    deliverable_map = {
+        "ecommerce": "Secondary Packaging & Courier Box",
+        "tech_saas": "REST API Gateway & Postgres DB",
+        "services_freelance": "Frontend React UI & Stripe Payment Integration",
+        "healthcare_pharma": "Primary packaging (HDPE bottle)",
+        "manufacturing": "Hydraulic Pressure Seal",
+        "general": "Core Deliverables & Specifications",
+    }
+
+    originating_site = state.get("originating_site") or facility_map.get(workspace, "Operations Hub")
+    impacted_npm = state.get("impacted_npm") or deliverable_map.get(workspace, "Core Deliverables")
+
+    return {
+        "originating_site": originating_site,
+        "impacted_npm": impacted_npm,
+        "processing_step": "classified",
+    }
+
+
+# ─── Node 3: Defect & Scope Summarizer ─────────────────────────────────────────
+
+def summarize_complaint_node(state: UniversalAgentState) -> dict:
+    """Produces high-impact executive summaries for issues, proposals, or service requests."""
+    workspace = state.get("workspace") or "general"
+    rec_type = state.get("record_type") or "issue"
+    product = state.get("product_name") or "Service"
+    customer = state.get("customer_name") or "Client"
+    category = state.get("complaint_category") or "Operations"
+    batch = state.get("batch_lot_number") or "N/A"
+    desc = state.get("complaint_description") or ""
+
+    if rec_type in ["service_request", "proposal"]:
+        summary = (
+            f"[{workspace.upper()}] {rec_type.replace('_', ' ').title()}: Request for '{product}' from {customer}. "
+            f"Engagement Category: {category}. Ref: {batch}."
+        )
+    else:
+        summary = (
+            f"[{workspace.upper()}] Operational Issue: Defect logged for '{product}' ({batch}) by {customer}. "
+            f"Category: {category}. Scope: {desc[:120]}..."
+        )
 
     return {
         "defect_summary": summary,
-        "processing_step": "defect_analyzed",
+        "processing_step": "summarized",
     }
 
 
-# ─── Node 4: Risk Assessment ──────────────────────────────────────────────────
+# ─── Node 4: Universal Evaluator & Action Generator ───────────────────────────
 
-def risk_assessment_node(state: ComplaintAgentState) -> dict:
-    """Determine severity, suggested next action, and initial risk narrative."""
-    product = state.get("product_name") or "Amoxicillin Capsules"
-    strength = state.get("product_strength") or "500 mg"
-    batch = state.get("batch_lot_number") or "AMX240602"
-    category = state.get("complaint_category") or "Product Defect - Discoloration"
-    qty = state.get("affected_quantity") or "12 capsules"
-    site = state.get("originating_site") or "Block A - Primary Manufacturing"
-    npm = state.get("impacted_npm") or "Primary packaging (HDPE bottle)"
+def generate_response_node(state: UniversalAgentState) -> dict:
+    """Generates next steps, impact evaluation, and executive communication drafts."""
+    workspace = state.get("workspace") or "general"
+    rec_type = state.get("record_type") or "issue"
+    product = state.get("product_name") or "Service"
+    customer = state.get("customer_name") or "Valued Client"
+    category = state.get("complaint_category") or "Operations"
+    severity = state.get("severity") or "Major"
+    batch = state.get("batch_lot_number") or "N/A"
+    qty = state.get("affected_quantity") or "1 unit"
     description = state.get("complaint_description") or ""
 
-    severity = state.get("severity") or "Major"
-    action = state.get("suggested_action") or "Route to QA Investigation & Issue Replacement"
-
-    raw_input = (state.get("raw_input") or "").lower()
-    is_shorten = any(k in raw_input for k in ["reduce", "short", "shorter", "concise", "brief", "summarize", "summary", "less", "compact", "small", "cut", "decrease", "lower"])
-    is_expand = any(k in raw_input for k in ["expand", "detailed", "full", "comprehensive", "elaborate", "longer", "increase"])
-    needs_improvement = is_shorten or is_expand or any(k in raw_input for k in ["improve", "refine", "re-assess", "reassess", "risk", "detail", "evaluate", "explain"])
-    existing_risk = state.get("initial_risk_assessment")
-
-    print(f"\n[NODE 4] risk_assessment — category: {category}, product: {product}, is_shorten: {is_shorten}, is_expand: {is_expand}")
-
-    risk_text = None
-    api_key = os.getenv("GROQ_API_KEY", "")
-
-    # Try LLM if API key is present
-    if api_key and api_key != "your_groq_api_key_here":
-        try:
-            if is_shorten:
-                length_instruction = "The user explicitly requested a SHORT, CONCISE Initial Risk Assessment narrative. Provide a brief 1-2 sentence summary (maximum 25-30 words)."
-            elif is_expand:
-                length_instruction = "The user explicitly requested an EXPANDED, HIGHLY DETAILED Initial Risk Assessment narrative. Provide a comprehensive 4-5 sentence analysis."
-            else:
-                length_instruction = "Provide a balanced 2-3 sentence professional risk assessment narrative."
-
-            system_prompt = f"""You are a Senior Pharmaceutical Quality Assurance & Regulatory Risk Expert.
-Generate an Initial Risk Assessment narrative for a pharmaceutical QMS complaint.
-LENGTH SPECIFICATION: {length_instruction}
-
-Return ONLY the risk assessment text paragraph. Do not include markdown code blocks or JSON formatting."""
-            human_prompt = f"Product: {product} {strength}\nBatch: {batch}\nQuantity: {qty}\nDefect Category: {category}\nSeverity: {severity}\nOriginating Site: {site}\nImpacted Material: {npm}\nDescription: {description}\nUser Request: {raw_input}"
-
-            llm = get_primary_llm()
-            res_content = _invoke_with_retry(llm, [
-                SystemMessage(content=system_prompt),
-                HumanMessage(content=human_prompt)
-            ])
-            if res_content and len(res_content.strip()) > 15:
-                risk_text = res_content.strip()
-        except Exception as e:
-            print(f"[NODE 4] LLM call failed ({e}). Falling back to heuristic risk generator.")
-
-    # Fallback or heuristic risk generator if LLM unavailable or if explicit modification requested
-    if not risk_text or needs_improvement or not existing_risk:
-        if is_shorten:
-            risk_text = (
-                f"Initial Risk Assessment (Severity: {severity}): Potential {category.lower()} in {product} ({batch}). "
-                f"Primary risk: potential stability/efficacy impact. Immediate Action: Quarantine batch & inspect retained samples."
-            )
-        elif is_expand:
-            risk_text = (
-                f"Comprehensive QMS Risk Evaluation (Severity: {severity}): Detailed assessment for {product} ({strength}), "
-                f"Batch #{batch} ({qty}) categorized under '{category}'. Safety & Efficacy Impact: Potential chemical degradation, "
-                f"moisture ingress, or packaging seal failure affecting therapeutic compliance. Site & Material Audit: Originating site ({site}) "
-                f"and packaging ({npm}) flagged for QA inspection. Action Plan: 1) Quarantine remaining inventory across channels. "
-                f"2) Perform HPLC assay and dissolution testing on retained samples. 3) Initiate 5-Why root cause analysis and log CAPA in QMS."
-            )
-        else:
-            risk_text = (
-                f"Initial Risk Assessment (Severity: {severity}): Risk evaluated for {product} ({strength}), Batch #{batch} ({qty}) "
-                f"under category '{category}'. Primary risk involves potential active ingredient degradation or physical compromise. "
-                f"Action Plan: Quarantine Batch #{batch} inventory, pull retained samples for QA testing, and initiate CAPA investigation."
-            )
+    if rec_type in ["service_request", "proposal"]:
+        suggested_action = (
+            f"1) Confirm scope deliverables with {customer}. "
+            f"2) Issue formal proposal and milestone estimate. "
+            f"3) Schedule kickoff discovery call."
+        )
+        assessment_text = (
+            f"Service Feasibility Evaluation (Priority: {severity}): The scope for '{product}' ({qty}) in category '{category}' is achievable. "
+            f"Resource allocation required for {state.get('impacted_npm', 'core deliverables')}. Target timeline SLA: within agreed milestone window."
+        )
+        draft_response = (
+            f"Hi {customer},\n\n"
+            f"Thank you for reaching out regarding '{product}'. We have reviewed your request and prepared a preliminary scope estimate:\n"
+            f"• Scope / Deliverables: {state.get('impacted_npm', 'Custom specifications')}\n"
+            f"• Reference / Work Order: {batch}\n"
+            f"• Estimated Timeline: {state.get('expiry_date', 'Within 2 weeks')}\n"
+            f"• Next Steps: We'd love to schedule a brief 15-minute call to finalize the milestones.\n\n"
+            f"Best regards,\nOperations Team"
+        )
+    else:
+        suggested_action = (
+            f"1) Immediate triage and customer resolution. "
+            f"2) Coordinate with {state.get('originating_site', 'Operations')} for root-cause inspection. "
+            f"3) Issue replacement, refund, or patch update."
+        )
+        assessment_text = (
+            f"Risk & Impact Evaluation (Severity: {severity}): Issue categorized under '{category}' affecting {product} (Ref: {batch}). "
+            f"Impact profile: Potential SLA breach or client dissatisfaction. Action Plan: Rapid mitigation initiated with {state.get('originating_site')}."
+        )
+        draft_response = (
+            f"Dear {customer},\n\n"
+            f"Thank you for contacting us regarding your experience with '{product}' (Reference #{batch}). "
+            f"We sincerely apologize for any inconvenience caused by the {category.lower()}.\n\n"
+            f"Our team has flagged this with high priority ({severity}) and is taking immediate action to rectify the situation. "
+            f"We will provide you with a resolution update shortly.\n\n"
+            f"Warm regards,\nCustomer Care & Operations"
+        )
 
     return {
         "severity": severity,
-        "suggested_action": action,
-        "initial_risk_assessment": risk_text,
-        "processing_step": "risk_assessed",
+        "suggested_action": suggested_action,
+        "initial_risk_assessment": assessment_text,
+        "response_draft": draft_response,
+        "processing_step": "evaluated",
     }
 
 
-# ─── Node 5: Format Response ──────────────────────────────────────────────────
+# ─── Node 5: Format Final Omniflow Response ───────────────────────────────────
 
-def format_response_node(state: ComplaintAgentState) -> dict:
-    """Generate the final AI Copilot response message and set status to ready."""
-    customer = state.get("customer_name") or "Apollo Pharmacy"
-    product = state.get("product_name") or "Amoxicillin Capsules"
-    category = state.get("complaint_category") or "discolored capsules"
+def format_response_node(state: UniversalAgentState) -> dict:
+    """Generates the final AI Copilot assistant message with clean formatting."""
+    customer = state.get("customer_name") or "Valued Client"
+    product = state.get("product_name") or "Service"
+    category = state.get("complaint_category") or "Operations"
     severity = state.get("severity") or "Major"
-    mfg = state.get("manufacturing_date") or ""
-    exp = state.get("expiry_date") or ""
+    rec_type = state.get("record_type") or "issue"
     batch = state.get("batch_lot_number") or ""
-    qty = state.get("affected_quantity") or ""
+    raw_input = (state.get("raw_input") or "").strip()
+    t_lower = raw_input.lower()
 
-    raw_input = (state.get("raw_input") or "").lower()
-    is_shorten = any(k in raw_input for k in ["reduce", "short", "shorter", "concise", "brief", "summarize", "summary", "less", "compact", "small", "cut", "decrease", "lower"])
-    is_expand = any(k in raw_input for k in ["expand", "detailed", "full", "comprehensive", "elaborate", "longer", "increase"])
+    # Check if this message was a field correction or update command
+    corr_keywords = ["correct", "change", "update", "fix", "modify", "replace", "set batch", "set product", "set client", "set customer", "set date"]
+    is_correction = any(k in t_lower for k in corr_keywords) and len(raw_input) < 100
 
-    if is_shorten:
-        response_text = (
-            f"Initial risk assessment text has been reduced and condensed into a concise summary as requested. "
-            f"Severity: **{severity}**. Concise risk summary updated in the form."
+    if is_correction and batch:
+        msg = (
+            f"⚡ **Field Updated Successfully!** Set **Batch / Reference #** to `{batch}` for **{product}** ({customer}). "
+            f"The form fields and resolution plan have been updated."
         )
-    elif is_expand:
-        response_text = (
-            f"Initial risk assessment has been expanded with detailed QMS analysis. "
-            f"Severity: **{severity}**. Comprehensive risk narrative updated in the form."
-        )
-    elif any(k in raw_input for k in ["risk", "improve", "refine", "re-assess", "reassess", "explain"]):
-        response_text = (
-            f"Initial risk assessment has been refined and updated successfully. "
-            f"Severity: **{severity}**. High-priority QMS risk narrative updated in the form."
-        )
-    elif any(k in raw_input for k in ["change", "update", "set", "modify", "correct", "replace", "quantity", "company", "customer"]):
-        response_text = (
-            f"Complaint updated successfully. Updated details: Customer **{customer}**, Product **{product}**, Batch **{batch}**, "
-            f"Manufacturing Date **{mfg}**, Expiry Date **{exp}**, Quantity **{qty}**. "
-            f"Severity: **{severity}**. The form has been updated."
+    elif rec_type in ["service_request", "proposal"]:
+        msg = (
+            f"⚡ **Service Request Processed!** Analyzed requirements for **{product}** ({customer}), "
+            f"Reference: `{batch}`, structured scope deliverables, evaluated feasibility (Priority: **{severity}**), "
+            f"and prepared an auto-draft proposal response. The form has been updated for your review."
         )
     else:
-        response_text = (
-            f"Complaint parsed successfully. I've extracted the product details, "
-            f"mapped the batch information, and generated an initial risk assessment for "
-            f"{category.lower() if category else 'the reported defect'}. "
-            f"Severity assessed as **{severity}**. "
-            f"The form has been auto-populated — please review and commit to the QMS Ledger when ready."
+        msg = (
+            f"⚡ **Operational Issue Triaged!** Extracted details for **{product}** (Ref: `{batch}`), "
+            f"categorized under **{category}** with severity assessed as **{severity}**. "
+            f"Action plan and customer resolution draft have been updated in the form."
         )
 
-    ai_message = AIMessage(content=response_text)
+    ai_message = AIMessage(content=msg)
 
     return {
         "messages": [ai_message],
         "status": "ready_to_commit",
         "processing_step": "complete",
     }
+
+
+# Node aliases for LangGraph and external module compatibility
+defect_analysis_node = summarize_complaint_node
+risk_assessment_node = generate_response_node
 

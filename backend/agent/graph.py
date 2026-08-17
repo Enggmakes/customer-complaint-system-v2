@@ -1,6 +1,6 @@
 from langgraph.graph import StateGraph, END
 from langgraph.checkpoint.memory import MemorySaver
-from .state import ComplaintAgentState
+from .state import UniversalAgentState
 from .nodes import (
     parse_complaint_node,
     classify_facility_node,
@@ -10,10 +10,10 @@ from .nodes import (
 )
 
 
-def build_complaint_graph():
-    """Build and compile the LangGraph complaint processing pipeline."""
+def build_universal_graph():
+    """Build and compile the LangGraph universal operations pipeline."""
 
-    builder = StateGraph(ComplaintAgentState)
+    builder = StateGraph(UniversalAgentState)
 
     # Register nodes
     builder.add_node("parse_complaint", parse_complaint_node)
@@ -37,4 +37,5 @@ def build_complaint_graph():
 
 
 # Singleton instance
-complaint_graph = build_complaint_graph()
+complaint_graph = build_universal_graph()
+universal_graph = complaint_graph

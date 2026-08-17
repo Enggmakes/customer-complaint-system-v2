@@ -2,7 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { useDispatch, useSelector } from 'react-redux';
 import { useSearchParams } from 'react-router-dom';
 import { v4 as uuidv4 } from 'uuid';
-import { FileText, Zap } from 'lucide-react';
+import { FileText, Sparkles } from 'lucide-react';
 import ComplaintForm from '../components/ComplaintForm/ComplaintForm';
 import AICopilot from '../components/AICopilot/AICopilot';
 import { fetchComplaintBySession } from '../store/complaintsSlice';
@@ -23,60 +23,64 @@ export default function LogComplaint() {
   const [searchParams, setSearchParams] = useSearchParams();
   const [activeTab, setActiveTab] = useState('copilot'); // 'form' | 'copilot'
   const formStatus = useSelector((state) => state.complaints.formStatus);
-  const session_id = useSelector((state) => state.chat.session_id);
+  const reduxSessionId = useSelector((state) => state.chat.session_id);
+
+  const { activeWorkspace, workspaces } = useSelector((state) => state.workspace);
+  const currentWs = workspaces[activeWorkspace] || workspaces.general;
+
+  const urlSessionId = searchParams.get('session_id');
 
   useEffect(() => {
-    const paramSession = searchParams.get('session_id');
-    const storedSession = localStorage.getItem('ccms_active_session_id');
+    let activeSession = urlSessionId;
 
-    let targetSession = paramSession || session_id || storedSession;
-
-    if (!targetSession) {
-      targetSession = uuidv4();
+    if (!activeSession) {
+      activeSession = reduxSessionId || localStorage.getItem('ccms_active_session_id') || uuidv4();
+      setSearchParams({ session_id: activeSession }, { replace: true });
     }
 
-    // Sync URL param if missing
-    if (paramSession !== targetSession) {
-      setSearchParams({ session_id: targetSession }, { replace: true });
+    localStorage.setItem('ccms_active_session_id', activeSession);
+
+    if (reduxSessionId !== activeSession) {
+      dispatch(setSessionId(activeSession));
     }
 
-    // Sync Redux & LocalStorage
-    localStorage.setItem('ccms_active_session_id', targetSession);
-    if (session_id !== targetSession) {
-      dispatch(setSessionId(targetSession));
+    if (activeSession) {
+      dispatch(fetchComplaintBySession(activeSession));
+      dispatch(fetchChatHistory(activeSession));
     }
-
-    // Load complaint state and chat history from backend DB for this session
-    dispatch(fetchComplaintBySession(targetSession));
-    dispatch(fetchChatHistory(targetSession));
-  }, [searchParams.get('session_id'), dispatch]);
+  }, [urlSessionId, dispatch]);
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', flex: 1, overflow: 'hidden' }}>
+    <div style={{ display: 'flex', flexDirection: 'column', flex: 1, height: '100%', overflow: 'hidden' }}>
       {/* Page Header */}
       <div className="page-header">
         <div className="page-header-left">
-          <h1>Log Customer Complaint</h1>
-          <p>API &amp; FDF Quality Assurance Module</p>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+            <h1>Operations Hub &amp; Triage</h1>
+            <span className="workspace-banner-pill" style={{ background: currentWs.gradient }}>
+              {currentWs.badge}
+            </span>
+          </div>
+          <p>{currentWs.name} — AI Assisted Intake, Scope &amp; Resolution</p>
         </div>
         <StatusBadge status={formStatus} />
       </div>
 
-      {/* Mobile Tab Switcher (Visible on Mobile/Tablet only) */}
+      {/* Mobile Tab Switcher */}
       <div className="mobile-segmented-tabs">
         <button
           className={`mobile-tab-btn ${activeTab === 'copilot' ? 'active' : ''}`}
           onClick={() => setActiveTab('copilot')}
         >
-          <Zap size={14} />
-          AIVOA Copilot
+          <Sparkles size={14} />
+          ahsi Copilot
         </button>
         <button
           className={`mobile-tab-btn ${activeTab === 'form' ? 'active' : ''}`}
           onClick={() => setActiveTab('form')}
         >
           <FileText size={14} />
-          Complaint Form
+          Operations Form
         </button>
       </div>
 

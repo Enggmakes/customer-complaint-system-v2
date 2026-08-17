@@ -5,9 +5,14 @@ import api from '../services/api';
 
 export const sendChatMessage = createAsyncThunk(
   'chat/sendMessage',
-  async ({ session_id, message }, { rejectWithValue }) => {
+  async ({ session_id, message, workspace, record_type }, { rejectWithValue }) => {
     try {
-      const res = await api.post('/api/chat/message', { session_id, message });
+      const res = await api.post('/api/chat/message', {
+        session_id,
+        message,
+        workspace: workspace || 'general',
+        record_type: record_type || 'issue',
+      });
       return res.data;
     } catch (err) {
       return rejectWithValue(err.response?.data?.detail || 'Failed to send message');
@@ -17,10 +22,12 @@ export const sendChatMessage = createAsyncThunk(
 
 export const uploadChatDocument = createAsyncThunk(
   'chat/uploadDocument',
-  async ({ session_id, file }, { rejectWithValue }) => {
+  async ({ session_id, file, workspace, record_type }, { rejectWithValue }) => {
     try {
       const formData = new FormData();
       formData.append('session_id', session_id);
+      formData.append('workspace', workspace || 'general');
+      formData.append('record_type', record_type || 'issue');
       formData.append('file', file);
 
       const res = await api.post('/api/chat/upload', formData, {
@@ -58,7 +65,7 @@ const chatSlice = createSlice({
         id: 'welcome',
         role: 'assistant',
         content:
-          "Ready to process new complaints. You can paste the raw email from the customer, or upload a PDF of the complaint report. I will extract the data and run the initial risk assessment.",
+          "**Welcome to ahsi AI!** I am your universal operations copilot. You can describe any customer issue, submit a service request, generate a client proposal, or upload documents/PDFs for automated analysis.",
       },
     ],
     loading: false,
@@ -82,7 +89,7 @@ const chatSlice = createSlice({
           id: 'welcome',
           role: 'assistant',
           content:
-            "Ready to process new complaints. You can paste the raw email from the customer, or upload a PDF of the complaint report. I will extract the data and run the initial risk assessment.",
+            "⚡ **Welcome to ahsi AI!** I am your universal operations copilot. You can describe any customer issue, submit a service request, generate a client proposal, or upload documents/PDFs for automated analysis.",
         },
       ];
       state.lastExtractedData = null;
@@ -115,7 +122,7 @@ const chatSlice = createSlice({
       state.messages.push({
         id: `err-${Date.now()}`,
         role: 'assistant',
-        content: `Sorry, I encountered an error: ${action.payload}. Please try again.`,
+        content: `Encountered an error: ${action.payload}. Please try again.`,
         isError: true,
       });
     });
@@ -153,13 +160,19 @@ const chatSlice = createSlice({
     });
 
     builder.addCase(fetchChatHistory.fulfilled, (state, action) => {
-      if (action.payload.length > 0) {
+      if (Array.isArray(action.payload) && action.payload.length > 0) {
         const mapped = action.payload.map((m) => ({
           id: `hist-${m.created_at}-${m.role}`,
           role: m.role === 'user' ? 'user' : 'assistant',
           content: m.content,
         }));
-        state.messages = [state.messages[0], ...mapped];
+        const welcome = state.messages.find((m) => m.id === 'welcome') || {
+          id: 'welcome',
+          role: 'assistant',
+          content:
+            "⚡ **Welcome to ahsi AI!** I am your universal operations copilot. Describe any customer issue, submit a service request, generate a client proposal, or upload documents for automated analysis.",
+        };
+        state.messages = [welcome, ...mapped];
       }
     });
   },

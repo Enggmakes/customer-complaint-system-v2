@@ -18,7 +18,11 @@ api.interceptors.request.use(
 api.interceptors.response.use(
   (response) => response,
   (error) => {
-    console.error('API Error:', error.response?.data || error.message);
+    // Suppress console error logs for expected 404s on new session initial lookups
+    const isExpected404 = error.response?.status === 404 && error.config?.url?.includes('/session/');
+    if (!isExpected404) {
+      console.warn('API Warning:', error.response?.data || error.message);
+    }
     return Promise.reject(error);
   }
 );

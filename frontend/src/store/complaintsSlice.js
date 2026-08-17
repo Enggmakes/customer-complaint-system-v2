@@ -5,12 +5,19 @@ import api from '../services/api';
 
 export const fetchComplaints = createAsyncThunk(
   'complaints/fetchAll',
-  async (_, { rejectWithValue }) => {
+  async (filters = {}, { rejectWithValue }) => {
     try {
-      const res = await api.get('/api/complaints');
+      const params = {};
+      if (filters.workspace && filters.workspace !== 'all') params.workspace = filters.workspace;
+      if (filters.record_type && filters.record_type !== 'all') params.record_type = filters.record_type;
+      if (filters.status && filters.status !== 'all') params.status = filters.status;
+      if (filters.severity && filters.severity !== 'all') params.severity = filters.severity;
+      if (filters.search) params.search = filters.search;
+
+      const res = await api.get('/api/complaints', { params });
       return res.data;
     } catch (err) {
-      return rejectWithValue(err.response?.data?.detail || 'Failed to fetch complaints');
+      return rejectWithValue(err.response?.data?.detail || 'Failed to fetch records');
     }
   }
 );
@@ -22,7 +29,7 @@ export const commitComplaint = createAsyncThunk(
       const res = await api.post('/api/complaints/commit', { session_id, complaint_data });
       return res.data;
     } catch (err) {
-      return rejectWithValue(err.response?.data?.detail || 'Failed to commit complaint');
+      return rejectWithValue(err.response?.data?.detail || 'Failed to commit record');
     }
   }
 );
@@ -34,7 +41,7 @@ export const deleteComplaint = createAsyncThunk(
       await api.delete(`/api/complaints/${id}`);
       return id;
     } catch (err) {
-      return rejectWithValue(err.response?.data?.detail || 'Failed to delete complaint');
+      return rejectWithValue(err.response?.data?.detail || 'Failed to delete record');
     }
   }
 );
@@ -46,12 +53,35 @@ export const fetchComplaintBySession = createAsyncThunk(
       const res = await api.get(`/api/complaints/session/${session_id}`);
       return res.data;
     } catch (err) {
-      return rejectWithValue(err.response?.data?.detail || 'Failed to fetch complaint session');
+      return rejectWithValue(err.response?.data?.detail || 'Failed to fetch session record');
     }
   }
 );
 
 // ─── Slice ─────────────────────────────────────────────────────────────────
+
+const initialForm = {
+  workspace: 'general',
+  record_type: 'issue',
+  title: '',
+  complaint_source: '',
+  customer_name: '',
+  product_name: '',
+  product_strength: '',
+  batch_lot_number: '',
+  affected_quantity: '',
+  manufacturing_date: '',
+  expiry_date: '',
+  originating_site: '',
+  impacted_npm: '',
+  defect_summary: '',
+  complaint_category: '',
+  complaint_description: '',
+  severity: 'Major',
+  suggested_action: '',
+  initial_risk_assessment: '',
+  response_draft: '',
+};
 
 const complaintsSlice = createSlice({
   name: 'complaints',
@@ -60,25 +90,7 @@ const complaintsSlice = createSlice({
     loading: false,
     error: null,
     commitStatus: 'idle', // idle | loading | succeeded | failed
-    // Current form data (live editing)
-    currentForm: {
-      complaint_source: '',
-      customer_name: '',
-      product_name: '',
-      product_strength: '',
-      batch_lot_number: '',
-      affected_quantity: '',
-      manufacturing_date: '',
-      expiry_date: '',
-      originating_site: '',
-      impacted_npm: '',
-      defect_summary: '',
-      complaint_category: '',
-      complaint_description: '',
-      severity: '',
-      suggested_action: '',
-      initial_risk_assessment: '',
-    },
+    currentForm: { ...initialForm },
     formStatus: 'pending_triage', // pending_triage | ready_to_commit | committed
   },
   reducers: {
@@ -88,17 +100,19 @@ const complaintsSlice = createSlice({
     },
     populateFormFromAI: (state, action) => {
       const data = action.payload;
+      const INVALID_BATCHES = ['ber', 'number', 'numbers', 'no', 'num', 'id', 'null', 'none', 'n/a'];
       Object.keys(state.currentForm).forEach((key) => {
         if (data[key] !== null && data[key] !== undefined && data[key] !== '') {
+          if (key === 'batch_lot_number' && INVALID_BATCHES.includes(String(data[key]).trim().toLowerCase())) {
+            return;
+          }
           state.currentForm[key] = data[key];
         }
       });
       state.formStatus = data.status || 'ready_to_commit';
     },
     resetForm: (state) => {
-      Object.keys(state.currentForm).forEach((key) => {
-        state.currentForm[key] = '';
-      });
+      state.currentForm = { ...initialForm };
       state.formStatus = 'pending_triage';
       state.commitStatus = 'idle';
     },
@@ -126,8 +140,12 @@ const complaintsSlice = createSlice({
     // Fetch By Session
     builder.addCase(fetchComplaintBySession.fulfilled, (state, action) => {
       const data = action.payload;
+      const INVALID_BATCHES = ['ber', 'number', 'numbers', 'no', 'num', 'id', 'null', 'none', 'n/a'];
       Object.keys(state.currentForm).forEach((key) => {
         if (data[key] !== null && data[key] !== undefined) {
+          if (key === 'batch_lot_number' && INVALID_BATCHES.includes(String(data[key]).trim().toLowerCase())) {
+            return;
+          }
           state.currentForm[key] = data[key];
         }
       });
@@ -141,7 +159,6 @@ const complaintsSlice = createSlice({
     builder.addCase(commitComplaint.fulfilled, (state, action) => {
       state.commitStatus = 'succeeded';
       state.formStatus = 'committed';
-      // Add to list if not there
       const idx = state.list.findIndex((c) => c.id === action.payload.id);
       if (idx >= 0) {
         state.list[idx] = action.payload;
@@ -153,6 +170,7 @@ const complaintsSlice = createSlice({
       state.commitStatus = 'failed';
       state.error = action.payload;
     });
+
     // Delete
     builder.addCase(deleteComplaint.fulfilled, (state, action) => {
       state.list = state.list.filter((c) => c.id !== action.payload);

@@ -1,23 +1,31 @@
 import React, { useState } from 'react';
-import { useDispatch } from 'react-redux';
+import { useDispatch, useSelector } from 'react-redux';
 import { useNavigate, useLocation } from 'react-router-dom';
 import {
   LayoutDashboard,
-  FilePlus2,
-  ClipboardList,
   Zap,
-  Shield,
+  ClipboardList,
+  Sparkles,
+  Wrench,
+  BarChart3,
+  Layers,
   Menu,
   X,
+  FilePlus2,
+  ChevronRight,
 } from 'lucide-react';
 import { resetForm } from '../../store/complaintsSlice';
 import { resetChat, setSessionId } from '../../store/chatSlice';
+import { setWorkspace } from '../../store/workspaceSlice';
 import { v4 as uuidv4 } from 'uuid';
+import ThemeToggle from '../Theme/ThemeToggle';
 
 const navItems = [
   { icon: LayoutDashboard, label: 'Dashboard', path: '/' },
-  { icon: FilePlus2, label: 'Log Complaint', path: '/log-complaint' },
-  { icon: ClipboardList, label: 'QMS Ledger', path: '/ledger' },
+  { icon: Zap, label: 'Operations Hub', path: '/log-complaint' },
+  { icon: BarChart3, label: 'DataLens Analytics', path: '/datalens' },
+  { icon: Wrench, label: 'AI Tool Suite', path: '/tools' },
+  { icon: ClipboardList, label: 'Universal Ledger', path: '/ledger' },
 ];
 
 export default function Sidebar() {
@@ -26,12 +34,15 @@ export default function Sidebar() {
   const location = useLocation();
   const [mobileOpen, setMobileOpen] = useState(false);
 
+  const { activeWorkspace, workspaces } = useSelector((state) => state.workspace);
+  const currentWs = workspaces[activeWorkspace] || workspaces.general;
+
   const handleNav = (path) => {
     navigate(path);
     setMobileOpen(false);
   };
 
-  const handleNewComplaint = () => {
+  const handleNewRecord = () => {
     const newSessionId = uuidv4();
     dispatch(resetForm());
     dispatch(resetChat());
@@ -41,15 +52,19 @@ export default function Sidebar() {
     setMobileOpen(false);
   };
 
+  const handleWorkspaceChange = (e) => {
+    dispatch(setWorkspace(e.target.value));
+  };
+
   return (
     <>
       {/* Mobile Top Header */}
       <header className="mobile-header">
         <div className="mobile-header-logo">
-          <div className="sidebar-logo-icon" style={{ width: 28, height: 28 }}>
-            <Shield size={15} color="white" />
+          <div className="sidebar-logo-icon" style={{ width: 28, height: 28, background: currentWs.gradient }}>
+            <Sparkles size={15} color="white" />
           </div>
-          <h2>CCMS Pharma QMS</h2>
+          <h2>ahsi AI</h2>
         </div>
         <button
           className="mobile-menu-btn"
@@ -68,15 +83,37 @@ export default function Sidebar() {
 
       {/* Sidebar Drawer */}
       <aside className={`sidebar ${mobileOpen ? 'mobile-open' : ''}`}>
-        {/* Logo */}
+        {/* Brand Logo */}
         <div className="sidebar-logo">
-          <div className="sidebar-logo-icon">
-            <Shield size={18} color="white" />
+          <div className="sidebar-logo-icon" style={{ background: currentWs.gradient }}>
+            <Sparkles size={18} color="white" />
           </div>
           <div className="sidebar-logo-text">
-            <h2>CCMS</h2>
-            <span>Pharma QMS</span>
+            <h2>ahsi AI</h2>
+            <span>Universal Operations</span>
           </div>
+        </div>
+
+        {/* Workspace Selector */}
+        <div className="workspace-selector-box">
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 6 }}>
+            <span style={{ fontSize: 10, color: 'rgba(255,255,255,0.6)', fontWeight: 700, letterSpacing: 0.5, textTransform: 'uppercase' }}>
+              Active Industry
+            </span>
+            <Layers size={12} color="rgba(255,255,255,0.5)" />
+          </div>
+          <select
+            className="workspace-select-dropdown"
+            value={activeWorkspace}
+            onChange={handleWorkspaceChange}
+            id="sidebar-workspace-select"
+          >
+            {Object.values(workspaces).map((ws) => (
+              <option key={ws.id} value={ws.id}>
+                {ws.badge}
+              </option>
+            ))}
+          </select>
         </div>
 
         {/* Navigation */}
@@ -89,32 +126,37 @@ export default function Sidebar() {
               onClick={() => handleNav(path)}
             >
               <Icon className="nav-icon" size={17} />
-              {label}
+              <span style={{ flex: 1 }}>{label}</span>
+              {location.pathname === path && <ChevronRight size={13} style={{ opacity: 0.7 }} />}
             </button>
           ))}
         </nav>
 
-        {/* New Complaint Button */}
-        <div style={{ padding: '12px 12px 16px' }}>
+        {/* New Operation / Service Button */}
+        <div style={{ padding: '12px 12px 14px' }}>
           <button
-            className="btn-commit"
-            style={{ marginTop: 0, fontSize: '13px', padding: '10px 14px' }}
-            onClick={handleNewComplaint}
+            className="sidebar-new-btn"
+            onClick={handleNewRecord}
           >
             <FilePlus2 size={14} style={{ marginRight: 6 }} />
-            New Complaint
+            New Operation
           </button>
+        </div>
+
+        {/* Theme Mode Selector (Light, Dark, System) */}
+        <div style={{ padding: '0 12px 12px' }}>
+          <ThemeToggle />
         </div>
 
         {/* Footer */}
         <div className="sidebar-footer">
           <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 4 }}>
             <Zap size={12} color="#5b5bd6" />
-            <span style={{ fontSize: 11, color: 'rgba(255,255,255,0.5)', fontWeight: 600 }}>
-              POWERED BY LANGGRAPH
+            <span style={{ fontSize: 11, color: 'rgba(255,255,255,0.6)', fontWeight: 600 }}>
+              POWERED BY LANGGRAPH &amp; GROQ
             </span>
           </div>
-          <div className="sidebar-footer-text">API &amp; FDF Quality Assurance</div>
+          <div className="sidebar-footer-text">Multi-Functional AI Operations Engine</div>
         </div>
       </aside>
     </>

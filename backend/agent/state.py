@@ -1,21 +1,24 @@
-from typing import TypedDict, Annotated, Sequence, Optional
+from typing import TypedDict, Annotated, Sequence, Optional, Dict, Any
 from langchain_core.messages import BaseMessage
 from langgraph.graph.message import add_messages
 
 
-class ComplaintAgentState(TypedDict):
+class UniversalAgentState(TypedDict):
     # Conversation history
     messages: Annotated[Sequence[BaseMessage], add_messages]
 
-    # Session tracking
+    # Session & Scope tracking
     session_id: str
     raw_input: str
+    workspace: Optional[str]        # ecommerce | tech_saas | services_freelance | healthcare_pharma | manufacturing | general
+    record_type: Optional[str]      # issue | service_request | proposal | inquiry
+    title: Optional[str]
 
-    # Section 1: Origin & Customer Details
+    # Client / Customer Details
     complaint_source: Optional[str]
     customer_name: Optional[str]
 
-    # Section 2: Product & Batch Identification
+    # Item / Product / Service Details
     product_name: Optional[str]
     product_strength: Optional[str]
     batch_lot_number: Optional[str]
@@ -23,21 +26,27 @@ class ComplaintAgentState(TypedDict):
     manufacturing_date: Optional[str]
     expiry_date: Optional[str]
 
-    # Section 3: Facility & Material Impact
+    # Facility / Department / Tech Stack
     originating_site: Optional[str]
     impacted_npm: Optional[str]
 
-    # Section 4: Defect Analysis
+    # Analysis & Scope
     defect_summary: Optional[str]
     complaint_category: Optional[str]
     complaint_description: Optional[str]
 
-    # AI Risk Assessment
+    # AI Evaluation & Output Drafts
     severity: Optional[str]
     suggested_action: Optional[str]
     initial_risk_assessment: Optional[str]
+    response_draft: Optional[str]
+    custom_data: Optional[Dict[str, Any]]
 
     # Workflow state
     status: str   # pending_triage | ready_to_commit | committed
     processing_step: Optional[str]
     error: Optional[str]
+
+
+# Backward-compatible alias
+ComplaintAgentState = UniversalAgentState
