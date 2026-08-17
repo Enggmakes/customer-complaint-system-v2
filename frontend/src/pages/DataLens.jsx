@@ -317,38 +317,38 @@ export default function DataLens() {
   const allCols = profile ? profile.headers : [];
 
   return (
-    <div className="ai-tools-page">
-      {/* Header */}
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 20 }}>
-        <div>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-            <div
-              style={{
-                width: 34,
-                height: 34,
-                background: 'linear-gradient(135deg, #3b82f6 0%, #8b5cf6 100%)',
-                borderRadius: 'var(--radius-md)',
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                boxShadow: 'var(--shadow-primary)',
-              }}
-            >
-              <BarChart3 size={18} color="white" />
-            </div>
-            <div>
-              <h1 style={{ fontSize: 22, fontWeight: 800, color: 'var(--color-text-primary)', letterSpacing: '-0.5px' }}>
-                DataLens Universal
-              </h1>
-              <span style={{ fontSize: 12, color: 'var(--color-text-secondary)' }}>
-                AI-Powered Data Analytics, Interactive Visualizations &amp; Trend Intelligence
-              </span>
-            </div>
+    <div className="datalens-page">
+      {/* Responsive Header */}
+      <div className="datalens-page-header">
+        <div className="datalens-header-left">
+          <div
+            style={{
+              width: 36,
+              height: 36,
+              minWidth: 36,
+              background: 'linear-gradient(135deg, #1e40af 0%, #3b82f6 100%)',
+              borderRadius: 'var(--radius-md)',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              boxShadow: 'var(--shadow-primary)',
+              flexShrink: 0,
+            }}
+          >
+            <BarChart3 size={18} color="white" />
+          </div>
+          <div>
+            <h1 style={{ fontSize: 22, fontWeight: 800, color: 'var(--color-text-primary)', letterSpacing: '-0.5px' }}>
+              DataLens Universal
+            </h1>
+            <span style={{ fontSize: 12.5, color: 'var(--color-text-secondary)', display: 'block', marginTop: 2 }}>
+              AI-Powered Data Analytics, Interactive Visualizations &amp; Trend Intelligence
+            </span>
           </div>
         </div>
 
-        <div style={{ display: 'flex', gap: 10 }}>
-          <label className="btn btn-secondary" style={{ cursor: 'pointer', fontSize: 12 }}>
+        <div className="datalens-header-actions">
+          <label className="btn btn-secondary" style={{ cursor: 'pointer', fontSize: 12, justifyContent: 'center' }}>
             <Upload size={13} />
             Upload CSV / JSON
             <input type="file" style={{ display: 'none' }} accept=".csv,.json,.txt,.tsv" onChange={handleFileUpload} />
@@ -357,7 +357,7 @@ export default function DataLens() {
             className="btn btn-primary"
             onClick={() => runAnalysis(dataText, datasetName)}
             disabled={loading}
-            style={{ fontSize: 12, background: currentWs.gradient }}
+            style={{ fontSize: 12, background: currentWs.gradient, justifyContent: 'center' }}
           >
             {loading ? <Loader2 size={13} className="spinner" /> : <RefreshCw size={13} />}
             Re-Analyze
@@ -366,9 +366,9 @@ export default function DataLens() {
       </div>
 
       {/* Preset Dataset Badges */}
-      <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 20, flexWrap: 'wrap' }}>
+      <div className="dataset-preset-chips">
         <span style={{ fontSize: 11, fontWeight: 700, color: 'var(--color-text-muted)', textTransform: 'uppercase' }}>
-          Try Live Sample Datasets:
+          Sample Datasets:
         </span>
         {Object.keys(SAMPLE_DATASETS).map((k) => (
           <button
@@ -425,10 +425,10 @@ export default function DataLens() {
       )}
 
       {/* ─── Main Grid: Interactive Visual Chart & AI Copilot ────────────────── */}
-      <div style={{ display: 'grid', gridTemplateColumns: '1.2fr 0.8fr', gap: 24, marginBottom: 24 }}>
+      <div className="datalens-main-grid">
         {/* Left: Interactive Visual Chart Studio */}
         <div className="tool-workspace-card" style={{ marginBottom: 0 }}>
-          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 16 }}>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 16, flexWrap: 'wrap', gap: 8 }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
               <BarChart3 size={17} color="var(--color-primary)" />
               <h3 style={{ fontSize: 15, fontWeight: 700 }}>Interactive Visual Chart Builder</h3>
@@ -469,9 +469,9 @@ export default function DataLens() {
             </div>
           </div>
 
-          {/* Chart Controls Bar */}
-          <div style={{ display: 'flex', gap: 10, marginBottom: 16, flexWrap: 'wrap' }}>
-            <div style={{ flex: 1, minWidth: 140 }}>
+          {/* Chart Controls Bar (Responsive 2x2 Grid on Mobile) */}
+          <div className="chart-controls-grid">
+            <div className="chart-control-field">
               <label className="field-label" style={{ fontSize: 11 }}>X-Axis Dimension</label>
               <select
                 className="field-input field-select"
@@ -487,7 +487,7 @@ export default function DataLens() {
               </select>
             </div>
 
-            <div style={{ flex: 1, minWidth: 140 }}>
+            <div className="chart-control-field">
               <label className="field-label" style={{ fontSize: 11 }}>Y-Axis Metric</label>
               <select
                 className="field-input field-select"
@@ -503,7 +503,7 @@ export default function DataLens() {
               </select>
             </div>
 
-            <div style={{ width: 110 }}>
+            <div className="chart-control-field">
               <label className="field-label" style={{ fontSize: 11 }}>Aggregation</label>
               <select
                 className="field-input field-select"
@@ -519,7 +519,7 @@ export default function DataLens() {
               </select>
             </div>
 
-            <div style={{ width: 90 }}>
+            <div className="chart-control-field">
               <label className="field-label" style={{ fontSize: 11 }}>Limit</label>
               <select
                 className="field-input field-select"
@@ -545,6 +545,7 @@ export default function DataLens() {
               display: 'flex',
               flexDirection: 'column',
               justifyContent: 'center',
+              overflowX: 'auto',
             }}
           >
             {chartData.length === 0 ? (
