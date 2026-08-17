@@ -55,15 +55,17 @@ export default function LogComplaint() {
       {/* Page Header */}
       <div className="page-header">
         <div className="page-header-left">
-          <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+          <div className="page-header-title-row">
             <h1>Operations Hub &amp; Triage</h1>
-            <span className="workspace-banner-pill" style={{ background: currentWs.gradient }}>
-              {currentWs.badge}
-            </span>
+            <div className="page-header-pills-row">
+              <span className="workspace-banner-pill" style={{ background: currentWs.gradient }}>
+                {currentWs.badge}
+              </span>
+              <StatusBadge status={formStatus} />
+            </div>
           </div>
           <p>{currentWs.name} — AI Assisted Intake, Scope &amp; Resolution</p>
         </div>
-        <StatusBadge status={formStatus} />
       </div>
 
       {/* Mobile Tab Switcher */}

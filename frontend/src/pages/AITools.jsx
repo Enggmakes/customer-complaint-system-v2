@@ -249,40 +249,40 @@ export default function AITools() {
 
   return (
     <div className="ai-tools-page">
-      {/* Header */}
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 20 }}>
-        <div>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-            <div
-              style={{
-                width: 36,
-                height: 36,
-                background: currentWs.gradient || 'linear-gradient(135deg, #4f46e5 0%, #06b6d4 100%)',
-                borderRadius: 'var(--radius-md)',
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                boxShadow: 'var(--shadow-primary)',
-              }}
-            >
-              <Sparkles size={18} color="white" />
-            </div>
-            <div>
-              <h1 style={{ fontSize: 22, fontWeight: 800, color: 'var(--color-text-primary)', letterSpacing: '-0.5px' }}>
-                ahsi AI Studio &amp; Services
-              </h1>
-              <p style={{ fontSize: 13, color: 'var(--color-text-secondary)', marginTop: 2 }}>
-                Multi-functional AI generators for high-converting proposals, executive client communications, and OCR document intelligence.
-              </p>
-            </div>
+      {/* Responsive Header */}
+      <div className="studio-page-header">
+        <div className="studio-header-left">
+          <div
+            style={{
+              width: 36,
+              height: 36,
+              minWidth: 36,
+              background: currentWs.gradient || 'linear-gradient(135deg, #1e3a8a 0%, #2563eb 100%)',
+              borderRadius: 'var(--radius-md)',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              boxShadow: 'var(--shadow-primary)',
+              flexShrink: 0,
+            }}
+          >
+            <Sparkles size={18} color="white" />
+          </div>
+          <div>
+            <h1 style={{ fontSize: 22, fontWeight: 800, color: 'var(--color-text-primary)', letterSpacing: '-0.5px' }}>
+              ahsi AI Studio &amp; Services
+            </h1>
+            <p className="studio-header-desc" style={{ fontSize: 13, color: 'var(--color-text-secondary)', marginTop: 2 }}>
+              Multi-functional AI generators for high-converting proposals, executive client communications, and OCR document intelligence.
+            </p>
           </div>
         </div>
 
-        <div style={{ display: 'flex', gap: 10 }}>
+        <div className="studio-header-actions">
           <button
             className="btn btn-secondary"
             onClick={() => navigate('/datalens')}
-            style={{ fontSize: 12 }}
+            style={{ fontSize: 12, whiteSpace: 'nowrap' }}
           >
             <BarChart3 size={14} color="var(--color-primary)" />
             Open DataLens Analytics
@@ -290,34 +290,31 @@ export default function AITools() {
         </div>
       </div>
 
-      {/* Studio Tabs */}
-      <div style={{ display: 'flex', gap: 10, marginBottom: 20, flexWrap: 'wrap' }}>
+      {/* Studio Segmented Tab Bar */}
+      <div className="studio-tab-bar">
         <button
           type="button"
-          className={`btn ${activeTab === 'proposal' ? 'btn-primary' : 'btn-secondary'}`}
+          className={`studio-tab-btn ${activeTab === 'proposal' ? 'active' : ''}`}
           onClick={() => setActiveTab('proposal')}
-          style={{ padding: '9px 16px', fontSize: 13 }}
         >
-          <FileText size={15} />
-          AI Proposal &amp; Quotation Studio
+          <FileText size={14} />
+          <span>Proposal Studio</span>
         </button>
         <button
           type="button"
-          className={`btn ${activeTab === 'email' ? 'btn-primary' : 'btn-secondary'}`}
+          className={`studio-tab-btn ${activeTab === 'email' ? 'active' : ''}`}
           onClick={() => setActiveTab('email')}
-          style={{ padding: '9px 16px', fontSize: 13 }}
         >
-          <Mail size={15} />
-          Smart Client Email Studio
+          <Mail size={14} />
+          <span>Email Studio</span>
         </button>
         <button
           type="button"
-          className={`btn ${activeTab === 'ocr' ? 'btn-primary' : 'btn-secondary'}`}
+          className={`studio-tab-btn ${activeTab === 'ocr' ? 'active' : ''}`}
           onClick={() => setActiveTab('ocr')}
-          style={{ padding: '9px 16px', fontSize: 13 }}
         >
-          <FileSearch size={15} />
-          DocuMind File &amp; PDF Scanner
+          <FileSearch size={14} />
+          <span>DocuMind OCR</span>
         </button>
       </div>
 

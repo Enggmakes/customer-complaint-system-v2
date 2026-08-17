@@ -307,25 +307,22 @@ export default function ComplaintForm() {
           boxShadow: 'var(--shadow-sm)',
         }}
       >
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+        <div className="workspace-banner-header">
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', flex: 1, minWidth: 0 }}>
             <span
               className="workspace-banner-pill"
               style={{ background: currentWs.gradient }}
             >
               {currentWs.badge}
             </span>
-            <span style={{ fontSize: 12, color: 'var(--color-text-secondary)', fontWeight: 500 }}>
+            <span className="workspace-tagline-text">
               {currentWs.tagline}
             </span>
           </div>
 
           <span
+            className="workspace-type-badge"
             style={{
-              fontSize: 11,
-              fontWeight: 700,
-              padding: '3px 8px',
-              borderRadius: '6px',
               background: typeConfig.bg,
               color: typeConfig.color,
               border: `1px solid ${typeConfig.border}`,
